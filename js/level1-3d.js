@@ -77,11 +77,11 @@
     clock = new THREE.Clock();
 
     // Lights
-    const ambient = new THREE.AmbientLight(0x404050, 0.45);
+    const ambient = new THREE.AmbientLight(0x667088, 0.72);
     scene.add(ambient);
 
     // Moon / sky light
-    const moon = new THREE.DirectionalLight(0x8899bb, 0.35);
+    const moon = new THREE.DirectionalLight(0xc4d0e8, 0.85);
     moon.position.set(-20, 40, -10);
     moon.castShadow = true;
     moon.shadow.mapSize.set(1024, 1024);
@@ -96,7 +96,7 @@
     // Torch lights along the alley
     const torchPositions = [-25, -10, 5, 20, 32];
     torchPositions.forEach((x, i) => {
-      const light = new THREE.PointLight(0xffaa44, 1.4, 18, 1.5);
+      const light = new THREE.PointLight(0xffaa44, 1.7, 18, 1.3);
       light.position.set(x, 3.2, (i % 2 === 0 ? 3.5 : -3.5));
       light.castShadow = true;
       light.shadow.mapSize.set(512, 512);
@@ -195,7 +195,7 @@
     // Player – low-poly 3D disciple (shared mesh helper)
     playerMesh = window.PaulCharacters.create('disciple');
     playerMesh.position.set(2, playerMesh.userData.centerY, 0);
-    window.PaulCharacters.faceDirection(playerMesh, 1, 0);
+    window.PaulCharacters.faceDirection(playerMesh, 0, 1);
     scene.add(playerMesh);
 
     // Invisible body for collision / logic

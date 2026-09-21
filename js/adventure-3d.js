@@ -265,14 +265,20 @@
 
   function setupLights(cfg) {
     if (cfg.theme === 'night') {
-      scene.add(new THREE.AmbientLight(0x404050, 0.4));
-      const moon = new THREE.DirectionalLight(0x8899bb, 0.3);
-      moon.position.set(-15, 35, -8);
+      scene.add(new THREE.AmbientLight(0x667088, 0.72));
+      const moon = new THREE.DirectionalLight(0xc4d0e8, 0.85);
+      moon.position.set(-8, 28, 12);
       moon.castShadow = true;
       moon.shadow.mapSize.set(1024, 1024);
+      moon.shadow.camera.near = 2;
+      moon.shadow.camera.far = 90;
+      moon.shadow.camera.left = -20;
+      moon.shadow.camera.right = 55;
+      moon.shadow.camera.top = 16;
+      moon.shadow.camera.bottom = -16;
       scene.add(moon);
-      [-20, -5, 12, 28, 45].forEach((x, i) => {
-        const pl = new THREE.PointLight(0xffaa44, 1.3, 16, 1.4);
+      [-20, -5, 2, 12, 28, 45].forEach((x, i) => {
+        const pl = new THREE.PointLight(0xffaa44, 1.7, 18, 1.3);
         pl.position.set(x, 3.0, i % 2 ? 3.2 : -3.2);
         pl.castShadow = true;
         scene.add(pl);
@@ -511,7 +517,7 @@
     playerMesh = window.PaulCharacters.create(role);
     playerPos = new THREE.Vector3(cfg.start.x, playerMesh.userData.centerY, cfg.start.z);
     playerMesh.position.copy(playerPos);
-    window.PaulCharacters.faceDirection(playerMesh, 1, 0);
+    window.PaulCharacters.faceDirection(playerMesh, 0, 1);
     scene.add(playerMesh);
   }
 

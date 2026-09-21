@@ -71,7 +71,7 @@
       roughness: 0.82,
       metalness: 0.06,
       emissive: color,
-      emissiveIntensity: 0.07
+      emissiveIntensity: 0.12
     }, extras));
   }
 
@@ -100,17 +100,13 @@
     tex.encoding = THREE.sRGBEncoding;
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
-    const mat = new THREE.MeshStandardMaterial({
+    const mat = new THREE.MeshBasicMaterial({
       map: tex,
-      roughness: 0.65,
-      metalness: 0,
-      transparent: true,
-      emissive: 0x221c10,
-      emissiveIntensity: 0.18
+      transparent: true
     });
     mat.userData.isFace = true;
-    const card = new THREE.Mesh(new THREE.PlaneGeometry(0.30, 0.34), mat);
-    card.position.set(0, 0.02, 0.22);
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.38), mat);
+    card.position.set(0, 0.02, 0.24);
     card.castShadow = false;
     card.receiveShadow = true;
     head.add(card);
