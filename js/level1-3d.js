@@ -6,7 +6,7 @@
 
 (function () {
   let renderer, scene, camera, clock;
-  let player, playerMesh, animTextures = [], currentFrame = 0, animTime = 0;
+  let player, playerMesh, animTime = 0;
   let guards = [];
   let keys = {};
   let yaw = 0, pitch = 0.25;
@@ -192,30 +192,10 @@
     gateLight.position.set(66, 3, 0);
     scene.add(gateLight);
 
-    // Player character – animated billboard (realistic look)
-    const loader = new THREE.TextureLoader();
-    animTextures = [
-      loader.load('assets/sprites/disciple_idle.png'),
-      loader.load('assets/sprites/disciple_walk1.png'),
-      loader.load('assets/sprites/disciple_walk2.png')
-    ];
-    animTextures.forEach(t => {
-      t.encoding = THREE.sRGBEncoding;
-      t.minFilter = THREE.LinearFilter;
-      t.magFilter = THREE.LinearFilter;
-    });
-
-    const planeGeo = new THREE.PlaneGeometry(1.4, 2.3);
-    const planeMat = new THREE.MeshBasicMaterial({
-      map: animTextures[0],
-      transparent: true,
-      side: THREE.DoubleSide,
-      depthWrite: true,
-      alphaTest: 0.3
-    });
-    playerMesh = new THREE.Mesh(planeGeo, planeMat);
-    playerMesh.position.set(2, 1.15, 0);
-    playerMesh.castShadow = true;
+    // Player – low-poly 3D disciple (shared mesh helper)
+    playerMesh = window.PaulCharacters.create('disciple');
+    playerMesh.position.set(2, playerMesh.userData.centerY, 0);
+    window.PaulCharacters.faceDirection(playerMesh, 1, 0);
     scene.add(playerMesh);
 
     // Invisible body for collision / logic
@@ -225,8 +205,6 @@
     };
 
     // Guards
-    const guardTex = loader.load('assets/sprites/guard.png');
-    guardTex.encoding = THREE.sRGBEncoding;
     const guardPositions = [
       { x: 15, z: 0, minX: 10, maxX: 28, speed: 3.2 },
       { x: 40, z: 1, minX: 32, maxX: 48, speed: 2.6 },
@@ -234,10 +212,9 @@
     ];
     guards = [];
     guardPositions.forEach(g => {
-      const gMat = new THREE.MeshBasicMaterial({ map: guardTex, transparent: true, side: THREE.DoubleSide, alphaTest: 0.3 });
-      const gMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 2.0), gMat);
-      gMesh.position.set(g.x, 1.0, g.z);
-      gMesh.castShadow = true;
+      const gMesh = window.PaulCharacters.create('guard');
+      gMesh.position.set(g.x, gMesh.userData.centerY, g.z);
+      window.PaulCharacters.faceDirection(gMesh, 1, 0);
       scene.add(gMesh);
       guards.push({
         mesh: gMesh,
@@ -306,15 +283,6 @@
       checkWin();
     }
 
-    // Make character billboards face roughly the camera (or forward)
-    if (playerMesh) {
-      // Soft face camera for better look
-      playerMesh.lookAt(camera.position.x, playerMesh.position.y, camera.position.z);
-    }
-    guards.forEach(g => {
-      g.mesh.lookAt(camera.position.x, g.mesh.position.y, camera.position.z);
-    });
-
     renderer.render(scene, camera);
   }
 
@@ -328,7 +296,8 @@
     if (keys['KeyA'] || keys['ArrowLeft']) direction.sub(right);
     if (keys['KeyD'] || keys['ArrowRight']) direction.add(right);
 
-    if (direction.lengthSq() > 0) {
+    const moving = direction.lengthSq() > 0;
+    if (moving) {
       direction.normalize();
       player.position.x += direction.x * SPEED * dt;
       player.position.z += direction.z * SPEED * dt;
@@ -336,25 +305,18 @@
       // Clamp inside alley
       player.position.x = Math.max(1, Math.min(WORLD_LEN - 2, player.position.x));
       player.position.z = Math.max(-4.5, Math.min(4.5, player.position.z));
+      window.PaulCharacters.faceDirection(playerMesh, direction.x, direction.z);
 
-      // Walk animation
       animTime += dt;
-      if (animTime > 0.18) {
+      if (animTime > 0.32) {
         animTime = 0;
-        currentFrame = currentFrame === 1 ? 2 : 1;
-        playerMesh.material.map = animTextures[currentFrame];
-        playerMesh.material.needsUpdate = true;
-      }
-    } else {
-      // Idle
-      if (playerMesh.material.map !== animTextures[0]) {
-        playerMesh.material.map = animTextures[0];
-        playerMesh.material.needsUpdate = true;
+        if (window.PaulSFX) window.PaulSFX.step();
       }
     }
 
     // Keep feet on ground
-    player.position.y = 1.15;
+    player.position.y = playerMesh.userData.centerY;
+    window.PaulCharacters.updateWalk(playerMesh, dt, moving, SPEED);
   }
 
   function updateCamera() {
@@ -377,7 +339,9 @@
       g.mesh.position.x += g.dir * g.speed * dt;
       if (g.mesh.position.x > g.maxX) g.dir = -1;
       if (g.mesh.position.x < g.minX) g.dir = 1;
-      g.mesh.position.y = 1.0;
+      g.mesh.position.y = g.mesh.userData.centerY;
+      window.PaulCharacters.faceDirection(g.mesh, g.dir, 0);
+      window.PaulCharacters.updateWalk(g.mesh, dt, true, g.speed);
     });
   }
 
@@ -393,13 +357,12 @@
       }
     });
     if (isHidden) {
-      playerMesh.material.opacity = 0.55;
-      playerMesh.material.transparent = true;
+      window.PaulCharacters.setOpacity(playerMesh, 0.45);
       if (statusEl && !gameWon) {
         statusEl.innerHTML = '<span style="color:#90ee90">Hidden behind cover — guards cannot see you</span>';
       }
     } else {
-      playerMesh.material.opacity = 1;
+      window.PaulCharacters.setOpacity(playerMesh, 1);
       if (statusEl && !gameWon && !statusEl.innerHTML.includes('Caught')) {
         statusEl.innerHTML = 'WASD move • Mouse look • Hide in stalls • Reach the <span style="color:#2ecc71">green gate</span>';
       }

@@ -1,11 +1,12 @@
 /* PAUL-3D-SWORD-2026 service worker — offline cache */
-const CACHE = 'paul-3d-sword-v2';
+const CACHE = 'paul-3d-sword-v3';
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './css/style.css',
   './js/game.js',
+  './js/character-mesh.js',
   './js/adventure-3d.js',
   './js/audio-mobile.js',
   './js/achievements.js',
