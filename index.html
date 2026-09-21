@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#c9a227">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <title>PAUL: From Hunted to Hunter – Sword of the Spirit</title>
+  <meta name="description" content="A realistic cinematic faith adventure for ages 8-15. Follow the Apostle Paul from hunted to hero." />
+  <meta name="theme-color" content="#0d0a08" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚔️</text></svg>" />
+</head>
+<body>
+  <div id="game-container">
+
+    <!-- TITLE SCREEN -->
+    <div id="title-screen">
+      <div class="cover-wrap">
+        <img src="assets/cover.jpg" alt="Paul: From Hunted to Hunter" class="cover" />
+      </div>
+      <h1>PAUL</h1>
+      <div class="subtitle">FROM HUNTED TO HUNTER</div>
+      <div class="tagline">Sword of the Spirit • Full 3D Faith Adventure</div>
+      
+      <button class="btn" onclick="startGame()">Begin the Journey</button>
+      <button class="btn secondary" onclick="continueGame()">Continue</button>
+      <button class="btn secondary" onclick="showCharacters()">Meet the Characters</button>
+      <button class="btn secondary" onclick="showLevelSelect()">Level Select</button>
+      <button class="btn secondary" onclick="showSettings()">Settings</button>
+      <button class="btn secondary" onclick="showAchievements()">Faith Stickers</button>
+
+      <div class="char-strip">
+        <img src="assets/characters/young_disciple.jpg" alt="Disciple" title="Young Disciple" />
+        <img src="assets/characters/ananias.jpg" alt="Ananias" title="Ananias" />
+        <img src="assets/characters/young_saul.jpg" alt="Saul" title="Young Saul" />
+        <img src="assets/characters/paul_mature.jpg" alt="Paul" title="Paul" />
+        <img src="assets/characters/peter.jpg" alt="Peter" title="Peter" />
+        <img src="assets/characters/paul_final.jpg" alt="Final Paul" title="Final Stand" />
+      </div>
+
+      <p style="margin-top:22px;font-size:0.82rem;opacity:0.65;max-width:420px;line-height:1.5;">
+        All 8 levels in FULL 3D third-person • Bible verse challenges<br>
+        Made for ages 8–15 • WASD + mouse • Play offline
+      </p>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud" style="display:none;">
+      <div class="lives" id="lives-display">❤️ 3</div>
+      <div class="level-name" id="level-display">Level 1</div>
+      <div id="diff-display" style="color:#c9b37a;font-size:0.85rem;">Easy</div>
+    </div>
+    <div class="progress-bar" id="progress-container" style="display:none;">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+
+    <!-- GAME AREA -->
+    <div id="game-area" style="display:none;">
+      <div id="message"></div>
+      <div id="level-content" class="panel active"></div>
+    </div>
+
+    <!-- VICTORY / GAME OVER -->
+    <div id="victory-screen" class="panel" style="display:none;"></div>
+    <div id="gameover-screen" class="panel" style="display:none;"></div>
+
+  </div>
+
+  <script src="js/libs/three.min.js"></script>
+  <script src="js/audio-mobile.js"></script>
+  <script src="js/achievements.js"></script>
+  <script src="js/vfx.js"></script>
+  <script src="js/level1-3d.js"></script>
+  <script src="js/adventure-3d.js"></script>
+  <script src="js/libs/phaser.min.js"></script>
+  <script src="js/level1-phaser.js"></script>
+  <script src="js/game.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>
