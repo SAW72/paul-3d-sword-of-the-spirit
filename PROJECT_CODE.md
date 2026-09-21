@@ -5,44 +5,21 @@
 PAUL-3D-SWORD-2026
 ```
 
-**Tell Grok:** Continue project **PAUL-3D-SWORD-2026**. Read `paul-game/PROJECT_CODE.md`.
+## GitHub (live)
+- **Repo:** https://github.com/SAW72/paul-3d-sword-of-the-spirit
+- **Pages (after first enable):** https://SAW72.github.io/paul-3d-sword-of-the-spirit/
 
-## Status (current)
-- ✅ 8 levels full 3D third-person (Three.js)
-- ✅ Walk: Disciple, Paul, Ananias, Peter
-- ✅ Mobile joystick + LOOK + Safari drag-look
-- ✅ Music/SFX + volume presets
-- ✅ localStorage save + Continue
-- ✅ Level Select + Settings
-- ✅ **Faith Stickers (12 achievements)** + toast unlocks
-- ✅ **Confetti VFX** on level clear & final victory
-- ✅ **PWA** — manifest + service worker + icons (Add to Home Screen / offline)
+### One-time Pages enable (if site 404s)
+1. Open repo → **Settings** → **Pages**
+2. Source: **GitHub Actions** (recommended) OR Deploy from branch `main` / root
+3. Wait 1–2 minutes, refresh the Pages URL
 
-## Play
-Open `paul-game/index.html`  
-Or install as PWA from browser menu when served over http(s).
+Or: **Actions** tab → “Deploy GitHub Pages” → if asked, enable workflows / approve first run.
 
-## Keys
-- Save: `PAUL_3D_SWORD_2026`
-- Achievements: `PAUL_3D_SWORD_2026_ACH`
-- Volume: `PAUL_3D_VOL` / `PAUL_3D_VOL_PRESET`
+## Status
+- ✅ On GitHub (public) as SAW72/paul-3d-sword-of-the-spirit
+- ✅ 8 levels 3D, stickers, PWA, save, mobile, walk cycles
+- ✅ Pages workflow committed
 
-## Main files
-| File | Role |
-|------|------|
-| `js/game.js` | Story, UI, save, routing |
-| `js/adventure-3d.js` | 3D engine levels 1–8 |
-| `js/audio-mobile.js` | Audio + mobile controls |
-| `js/achievements.js` | Stickers system |
-| `js/vfx.js` | Confetti |
-| `sw.js` + `manifest.json` | PWA offline |
-
-## Next ideas
-- More particle trails in 3D
-- Daily challenge mode
-- Leaderboard (optional, local only)
-- GitHub Pages publish
-- Multiplayer scripture quiz (future)
-
-## Package
-`/workspace/artifacts/paul-from-hunted-to-hunter-game.tar.gz`
+## Local play
+`index.html` in this folder / clone the repo
