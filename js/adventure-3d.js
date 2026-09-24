@@ -17,7 +17,11 @@
   let holdStartedAt = 0;
   let catchCooldown = 0;
   let playerFill = null;
-  const JAR_HOME = { x: 60.6, z: 3.85 };
+  // Open +Z pocket between the first stall and the second guard's lane.
+  // The old spot (x 60.6, beside the gate) sat inside the third guard's patrol,
+  // so a wall hug that drifted off z=4.2 saw the label and died before the prompt.
+  const JAR_HOME = { x: 27.0, z: 4.0 };
+  const JAR_REACH = 7.0;
 
   const LEVELS = {
     1: {
@@ -25,7 +29,7 @@
       player: 'disciple',
       walk: true,
       theme: 'night',
-      objective: 'Reach the City Gate. Hide behind stalls. Near the gate, press E to pick up the water jar and E again to place it.',
+      objective: 'Reach the City Gate. Hide behind stalls. The water jar is optional: along the left wall, press E to pick it up and E again to place it.',
       start: { x: 2, z: 0 },
       goal: { x: 68, z: 0, r: 3.5, label: 'CITY GATE' },
       guards: true,
@@ -558,9 +562,25 @@
     plinth.receiveShadow = true;
     scene.add(plinth);
 
-    const lamp = new THREE.PointLight(0xffb060, 0.7, 7, 1.4);
+    const lamp = new THREE.PointLight(0xffb060, 0.9, 14, 1.2);
     lamp.position.set(JAR_HOME.x, 1.4, JAR_HOME.z);
     scene.add(lamp);
+
+    // Faint reach ring plus a brighter pad so the hug lane reads before the prompt.
+    const reachRing = new THREE.Mesh(
+      new THREE.RingGeometry(JAR_REACH - 0.55, JAR_REACH - 0.08, 64),
+      new THREE.MeshBasicMaterial({ color: 0xe8c547, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false })
+    );
+    reachRing.rotation.x = -Math.PI / 2;
+    reachRing.position.set(JAR_HOME.x, 0.05, JAR_HOME.z);
+    scene.add(reachRing);
+    const pad = new THREE.Mesh(
+      new THREE.RingGeometry(0.85, 2.15, 40),
+      new THREE.MeshBasicMaterial({ color: 0xffe7a0, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.set(JAR_HOME.x, 0.06, JAR_HOME.z);
+    scene.add(pad);
 
     carryLabel = addFloatingLabel(JAR_HOME.x, 1.55, JAR_HOME.z, 'WATER JAR', '#e8c547');
   }
@@ -733,7 +753,7 @@
     carryState.prop.getWorldPosition(_jarPos);
     const dx = playerPos.x - _jarPos.x;
     const dz = playerPos.z - _jarPos.z;
-    return Math.hypot(dx, dz) < 3.2;
+    return Math.hypot(dx, dz) < JAR_REACH;
   }
 
   function carryContext(pressed) {

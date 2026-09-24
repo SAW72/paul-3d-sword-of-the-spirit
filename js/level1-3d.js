@@ -23,7 +23,8 @@
   let holdStartedAt = 0;
   let catchCooldown = 0;
   let playerFill = null;
-  const JAR_HOME = { x: 60.6, z: 3.85 };
+  const JAR_HOME = { x: 27.0, z: 4.0 };
+  const JAR_REACH = 7.0;
 
   const SPEED = 8.5;
   const WORLD_LEN = 80;
@@ -210,7 +211,7 @@
       scene.add(canopy);
     });
 
-    // Water jar by the gate — pick up with E, place with E
+    // Water jar on the +Z wall, before the later guards — pick up with E, place with E
     if (window.PaulCharacters.createWaterJar) {
       const jar = window.PaulCharacters.createWaterJar();
       jar.position.set(JAR_HOME.x, 0.36, JAR_HOME.z);
@@ -224,9 +225,23 @@
       plinth.castShadow = true;
       plinth.receiveShadow = true;
       scene.add(plinth);
-      const jarLight = new THREE.PointLight(0xffb060, 0.7, 7, 1.4);
+      const jarLight = new THREE.PointLight(0xffb060, 0.9, 14, 1.2);
       jarLight.position.set(JAR_HOME.x, 1.4, JAR_HOME.z);
       scene.add(jarLight);
+      const reachRing = new THREE.Mesh(
+        new THREE.RingGeometry(JAR_REACH - 0.55, JAR_REACH - 0.08, 64),
+        new THREE.MeshBasicMaterial({ color: 0xe8c547, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false })
+      );
+      reachRing.rotation.x = -Math.PI / 2;
+      reachRing.position.set(JAR_HOME.x, 0.05, JAR_HOME.z);
+      scene.add(reachRing);
+      const pad = new THREE.Mesh(
+        new THREE.RingGeometry(0.85, 2.15, 40),
+        new THREE.MeshBasicMaterial({ color: 0xffe7a0, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
+      );
+      pad.rotation.x = -Math.PI / 2;
+      pad.position.set(JAR_HOME.x, 0.06, JAR_HOME.z);
+      scene.add(pad);
     }
 
     // City Gate (win)
@@ -289,7 +304,7 @@
 
     // Start loop
     animationId = requestAnimationFrame(animate);
-    statusEl.innerHTML = 'Click the view to look around • <b>WASD</b> move • <b>E</b> pick up the jar by the gate • Hide behind stalls • Reach the <span style="color:#2ecc71">green gate</span>';
+    statusEl.innerHTML = 'Click the view to look around • <b>WASD</b> move • <b>E</b> pick up the jar on the left wall • Hide behind stalls • Reach the <span style="color:#2ecc71">green gate</span>';
   }
 
   function isGrabKey(e) {
@@ -390,7 +405,7 @@
     carryState.prop.getWorldPosition(_jarPos);
     const dx = player.position.x - _jarPos.x;
     const dz = player.position.z - _jarPos.z;
-    return Math.hypot(dx, dz) < 3.2;
+    return Math.hypot(dx, dz) < JAR_REACH;
   }
 
   function carryContext(pressed) {
