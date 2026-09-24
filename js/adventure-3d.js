@@ -5,13 +5,16 @@
 
 (function () {
   let renderer, scene, camera, clock, animId;
-  let playerMesh, playerPos, animTextures = [], animIdx = 0, animT = 0;
-  let keys = {}, yaw = 0, pitch = 0.2, pointerLocked = false;
+  let playerMesh, playerPos, animT = 0;
+  let keys = {}, yaw = Math.PI / 2, pitch = 0.2, pointerLocked = false;
   let npcs = [], hideZones = [], goalZone = null, interactZone = null;
   let isHidden = false, frozen = false, gameWon = false, lives = 3;
   let statusEl, livesEl, container, currentLevel = 1;
   let onComplete, onLifeLost, onGameOver, onInteract;
   let SPEED = 8.5;
+  let carryState = null, carryLabel = null, carryHintEl = null, carryBtn = null;
+  let grabQueued = false;
+  const JAR_HOME = { x: 62.2, z: 2.35 };
 
   const LEVELS = {
     1: {
@@ -19,11 +22,12 @@
       player: 'disciple',
       walk: true,
       theme: 'night',
-      objective: 'Reach the City Gate. Hide behind stalls from guards.',
+      objective: 'Reach the City Gate. Hide behind stalls. Near the gate, press E to pick up the water jar and E again to place it.',
       start: { x: 2, z: 0 },
       goal: { x: 68, z: 0, r: 3.5, label: 'CITY GATE' },
       guards: true,
-      hide: true
+      hide: true,
+      pickup: true
     },
     2: {
       name: 'Damascus – Ananias',
@@ -143,12 +147,26 @@
         <span style="opacity:0.85">Click/tap view • WASD or left stick • Mouse / LOOK pad</span>
       </div>
       <div id="adv-lives" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.75);color:#ff6b6b;padding:10px 14px;border-radius:10px;font-size:18px;font-weight:bold;">❤️ ${lives}</div>
+      <div id="adv-carry" style="position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;">
+        <div id="adv-carry-hint" style="display:none;background:rgba(0,0,0,0.78);color:#e8d5a3;border:1px solid rgba(232,197,71,0.45);border-radius:10px;padding:8px 14px;font-size:14px;font-weight:600;"></div>
+        <button id="adv-carry-btn" type="button" style="display:none;pointer-events:auto;background:#c9a227;color:#1a1208;border:none;border-radius:12px;padding:10px 18px;font-weight:700;font-size:15px;cursor:pointer;font-family:Inter,sans-serif;">Pick up</button>
+      </div>
       <div style="position:absolute;top:50%;left:50%;width:10px;height:10px;margin:-5px;border:2px solid rgba(232,197,71,0.5);border-radius:50%;"></div>
     `;
     container.style.position = 'relative';
     container.appendChild(ui);
     statusEl = document.getElementById('adv-status');
     livesEl = document.getElementById('adv-lives');
+    carryHintEl = document.getElementById('adv-carry-hint');
+    carryBtn = document.getElementById('adv-carry-btn');
+    grabQueued = false;
+    if (carryBtn) {
+      carryBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        grabQueued = true;
+      });
+    }
     // Mobile controls + unlock audio
     if (window.PaulMobile) window.PaulMobile.create(container);
     if (window.PaulAudio) window.PaulAudio.unlock();
@@ -192,6 +210,7 @@
 
     buildWorld(cfg);
     buildPlayer(cfg);
+    if (cfg.pickup) buildPickup(cfg);
     if (cfg.guards) buildGuards(cfg);
     if (cfg.npc) buildNPC(cfg);
 
@@ -265,14 +284,20 @@
 
   function setupLights(cfg) {
     if (cfg.theme === 'night') {
-      scene.add(new THREE.AmbientLight(0x404050, 0.4));
-      const moon = new THREE.DirectionalLight(0x8899bb, 0.3);
-      moon.position.set(-15, 35, -8);
+      scene.add(new THREE.AmbientLight(0x667088, 0.72));
+      const moon = new THREE.DirectionalLight(0xc4d0e8, 0.85);
+      moon.position.set(-8, 28, 12);
       moon.castShadow = true;
       moon.shadow.mapSize.set(1024, 1024);
+      moon.shadow.camera.near = 2;
+      moon.shadow.camera.far = 90;
+      moon.shadow.camera.left = -20;
+      moon.shadow.camera.right = 55;
+      moon.shadow.camera.top = 16;
+      moon.shadow.camera.bottom = -16;
       scene.add(moon);
-      [-20, -5, 12, 28, 45].forEach((x, i) => {
-        const pl = new THREE.PointLight(0xffaa44, 1.3, 16, 1.4);
+      [-20, -5, 2, 12, 28, 45].forEach((x, i) => {
+        const pl = new THREE.PointLight(0xffaa44, 1.7, 18, 1.3);
         pl.position.set(x, 3.0, i % 2 ? 3.2 : -3.2);
         pl.castShadow = true;
         scene.add(pl);
@@ -506,47 +531,40 @@
     }
   }
 
+  function buildPickup(cfg) {
+    if (!window.PaulCharacters.createWaterJar) return;
+    const jar = window.PaulCharacters.createWaterJar();
+    jar.position.set(JAR_HOME.x, 0.36, JAR_HOME.z);
+    scene.add(jar);
+    carryState = window.PaulCharacters.createCarryState(jar);
+
+    const plinth = new THREE.Mesh(
+      new THREE.BoxGeometry(1.05, 0.36, 0.78),
+      new THREE.MeshStandardMaterial({ color: 0x6d675c, roughness: 0.92 })
+    );
+    plinth.position.set(JAR_HOME.x, 0.18, JAR_HOME.z);
+    plinth.castShadow = true;
+    plinth.receiveShadow = true;
+    scene.add(plinth);
+
+    const lamp = new THREE.PointLight(0xffb060, 0.7, 7, 1.4);
+    lamp.position.set(JAR_HOME.x, 1.4, JAR_HOME.z);
+    scene.add(lamp);
+
+    carryLabel = addFloatingLabel(JAR_HOME.x, 1.55, JAR_HOME.z, 'WATER JAR', '#e8c547');
+  }
+
   function buildPlayer(cfg) {
-    const loader = new THREE.TextureLoader();
-    let idlePath, walk1 = null, walk2 = null;
-    if (cfg.player === 'disciple') {
-      idlePath = 'assets/sprites/disciple_idle.png';
-      walk1 = 'assets/sprites/disciple_walk1.png';
-      walk2 = 'assets/sprites/disciple_walk2.png';
-    } else if (cfg.player === 'ananias') {
-      idlePath = 'assets/sprites/ananias_idle.png';
-      walk1 = 'assets/sprites/ananias_walk1.png';
-      walk2 = 'assets/sprites/ananias_walk2.png';
-    } else {
-      idlePath = 'assets/sprites/paul_idle.png';
-      walk1 = 'assets/sprites/paul_walk1.png';
-      walk2 = 'assets/sprites/paul_walk2.png';
-    }
-
-    animTextures = [loader.load(idlePath)];
-    // Always animate walk when frames exist (Paul + Disciple)
-    if (walk1 && walk2) {
-      animTextures.push(loader.load(walk1), loader.load(walk2));
-    }
-    animTextures.forEach(t => {
-      t.encoding = THREE.sRGBEncoding;
-      t.minFilter = THREE.LinearFilter;
-    });
-
-    const mat = new THREE.MeshBasicMaterial({
-      map: animTextures[0], transparent: true, side: THREE.DoubleSide, alphaTest: 0.25, depthWrite: true
-    });
-    playerMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.4), mat);
-    playerPos = new THREE.Vector3(cfg.start.x, 1.2, cfg.start.z);
+    const role = cfg.player || 'paul';
+    const scale = currentLevel === 1 ? 1.16 : 1;
+    playerMesh = window.PaulCharacters.create(role, { scale: scale });
+    playerPos = new THREE.Vector3(cfg.start.x, playerMesh.userData.centerY, cfg.start.z);
     playerMesh.position.copy(playerPos);
-    playerMesh.castShadow = true;
+    window.PaulCharacters.faceDirection(playerMesh, 1, 0);
     scene.add(playerMesh);
   }
 
   function buildGuards(cfg) {
-    const loader = new THREE.TextureLoader();
-    const gTex = loader.load('assets/sprites/guard.png');
-    gTex.encoding = THREE.sRGBEncoding;
     const patrols = [
       { x: 14, z: 0.5, min: 8, max: 24, sp: 3.0 },
       { x: 32, z: -0.5, min: 26, max: 40, sp: 2.5 },
@@ -554,38 +572,30 @@
     ];
     npcs = [];
     patrols.forEach(p => {
-      const mat = new THREE.MeshBasicMaterial({ map: gTex, transparent: true, side: THREE.DoubleSide, alphaTest: 0.3 });
-      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.25, 2.0), mat);
-      mesh.position.set(p.x, 1.0, p.z);
+      const mesh = window.PaulCharacters.create('guard');
+      mesh.position.set(p.x, mesh.userData.centerY, p.z);
+      window.PaulCharacters.faceDirection(mesh, 1, 0);
       scene.add(mesh);
       npcs.push({ mesh, min: p.min, max: p.max, speed: p.sp, dir: 1, type: 'guard' });
     });
   }
 
   function buildNPC(cfg) {
-    const loader = new THREE.TextureLoader();
     if (cfg.npc === 'lame') {
-      const marker = new THREE.Mesh(
-        new THREE.SphereGeometry(0.35, 8, 8),
-        new THREE.MeshStandardMaterial({ color: 0xc9a227, emissive: 0x886600, emissiveIntensity: 0.3 })
-      );
-      marker.position.set(cfg.goal.x, 0.4, cfg.goal.z);
-      scene.add(marker);
+      const mesh = window.PaulCharacters.create('lame', { pose: 'sit' });
+      mesh.position.set(cfg.goal.x, mesh.userData.centerY, cfg.goal.z);
+      window.PaulCharacters.faceDirection(mesh, -1, 0);
+      scene.add(mesh);
       addFloatingLabel(cfg.goal.x, 2.2, cfg.goal.z, 'Lame Man', '#e8c547');
+      npcs.push({ mesh, type: 'npc', static: true });
       return;
     }
-    // Peter (or other) with idle + walk cycle for living presence
-    const idlePath = cfg.npc === 'peter' ? 'assets/sprites/peter_idle.png' : 'assets/sprites/paul_idle.png';
-    const w1 = cfg.npc === 'peter' ? 'assets/sprites/peter_walk1.png' : null;
-    const w2 = cfg.npc === 'peter' ? 'assets/sprites/peter_walk2.png' : null;
-    const texs = [loader.load(idlePath)];
-    if (w1 && w2) { texs.push(loader.load(w1), loader.load(w2)); }
-    texs.forEach(t => { t.encoding = THREE.sRGBEncoding; t.minFilter = THREE.LinearFilter; });
-    const mat = new THREE.MeshBasicMaterial({ map: texs[0], transparent: true, side: THREE.DoubleSide, alphaTest: 0.25 });
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.4), mat);
-    mesh.position.set(cfg.goal.x, 1.2, cfg.goal.z + 1.5);
+    const role = cfg.npc === 'peter' ? 'peter' : 'paul';
+    const mesh = window.PaulCharacters.create(role);
+    mesh.position.set(cfg.goal.x, mesh.userData.centerY, cfg.goal.z + 1.5);
+    window.PaulCharacters.faceDirection(mesh, -1, 0);
     scene.add(mesh);
-    npcs.push({ mesh, type: 'npc', static: true, animTexs: texs, animT: 0, animI: 0 });
+    npcs.push({ mesh, type: 'npc', static: true });
   }
 
   function addFloatingLabel(x, y, z, text, color) {
@@ -604,11 +614,13 @@
     spr.position.set(x, y, z);
     spr.scale.set(4, 1, 1);
     scene.add(spr);
+    return spr;
   }
 
   function onKey(e) {
     keys[e.code] = true;
-    if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+    if (e.code === 'KeyE' && !e.repeat) grabQueued = true;
+    if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyE'].includes(e.code)) e.preventDefault();
   }
   function onKeyUp(e) { keys[e.code] = false; }
   function onMouse(e) {
@@ -639,11 +651,6 @@
     } else {
       updateCamera();
     }
-    // Face camera
-    if (playerMesh) playerMesh.lookAt(camera.position.x, playerMesh.position.y, camera.position.z);
-    npcs.forEach(n => {
-      if (n.mesh) n.mesh.lookAt(camera.position.x, n.mesh.position.y, camera.position.z);
-    });
     renderer.render(scene, camera);
   }
 
@@ -672,41 +679,106 @@
       }
     }
 
-    if (dir.lengthSq() > 0) {
+    const moving = dir.lengthSq() > 0;
+    if (moving) {
       dir.normalize();
       playerPos.x += dir.x * SPEED * dt;
       playerPos.z += dir.z * SPEED * dt;
       playerPos.x = Math.max(1, Math.min(72, playerPos.x));
       playerPos.z = Math.max(-4.2, Math.min(4.2, playerPos.z));
       playerMesh.position.copy(playerPos);
+      const reachingJar = carryState && (carryState.phase === 'reaching' || (grabQueued && jarInRange()));
+      if (!reachingJar) window.PaulCharacters.faceDirection(playerMesh, dir.x, dir.z);
 
-      if (animTextures.length > 1) {
-        animT += dt;
-        if (animT > 0.17) {
-          animT = 0;
-          animIdx = animIdx === 1 ? 2 : 1;
-          playerMesh.material.map = animTextures[animIdx];
-          playerMesh.material.needsUpdate = true;
-          if (window.PaulSFX) window.PaulSFX.step();
+      animT += dt;
+      if (animT > 0.32) {
+        animT = 0;
+        if (window.PaulSFX) window.PaulSFX.step();
+      }
+    }
+    updateCarry(dt, moving);
+    window.PaulCharacters.updateWalk(playerMesh, dt, moving, SPEED);
+  }
+
+  function jarInRange() {
+    if (!carryState || !carryState.prop) return false;
+    if (carryState.phase === 'holding' || carryState.phase === 'placing') return false;
+    if (carryState.prop.parent !== scene) return false;
+    const p = carryState.prop.position;
+    const dx = playerPos.x - p.x;
+    const dz = playerPos.z - p.z;
+    return Math.hypot(dx, dz) < 1.75;
+  }
+
+  function placePoint() {
+    const yawC = playerMesh.rotation.y;
+    let x = playerPos.x + Math.sin(yawC) * 1.3;
+    let z = playerPos.z + Math.cos(yawC) * 1.3;
+    x = Math.max(1.2, Math.min(70.5, x));
+    z = Math.max(-4.0, Math.min(4.0, z));
+    return { x: x, y: 0, z: z };
+  }
+
+  function updateCarry(dt) {
+    if (!carryState || !window.PaulCharacters.stepCarry || frozen || gameWon) return;
+    const inRange = jarInRange();
+    if (carryState.phase === 'reaching' || (grabQueued && inRange)) {
+      const p = carryState.prop.position;
+      if (carryState.prop.parent === scene) {
+        window.PaulCharacters.faceDirection(playerMesh, p.x - playerPos.x, p.z - playerPos.z);
+        const dx = p.x - playerPos.x;
+        const dz = p.z - playerPos.z;
+        const dist = Math.hypot(dx, dz) || 1;
+        const want = 0.98;
+        if (dist > want) {
+          const step = Math.min(dist - want, 7 * dt);
+          playerPos.x += (dx / dist) * step;
+          playerPos.z += (dz / dist) * step;
+          playerPos.x = Math.max(1, Math.min(72, playerPos.x));
+          playerPos.z = Math.max(-4.2, Math.min(4.2, playerPos.z));
+          playerMesh.position.copy(playerPos);
         }
-      } else {
-        animT += dt;
-        if (animT > 0.35) { animT = 0; if (window.PaulSFX) window.PaulSFX.step(); }
       }
-    } else if (animTextures.length) {
-      if (playerMesh.material.map !== animTextures[0]) {
-        playerMesh.material.map = animTextures[0];
-        playerMesh.material.needsUpdate = true;
-      }
+    }
+    const pressed = grabQueued;
+    grabQueued = false;
+    const result = window.PaulCharacters.stepCarry(carryState, dt, {
+      pressed: pressed,
+      inRange: inRange,
+      playerMesh: playerMesh,
+      scene: scene,
+      placeAt: placePoint()
+    });
+    if (result.event === 'grabbed' && window.PaulSFX) window.PaulSFX.goal();
+    if (result.event === 'placed' && window.PaulSFX) window.PaulSFX.click();
+    const prop = carryState.prop;
+    if (prop && prop.userData.bodyMat && prop.parent === scene) {
+      prop.userData.bodyMat.emissiveIntensity = inRange ? 0.45 : 0.16;
+    }
+    if (carryLabel) {
+      const loose = prop && prop.parent === scene;
+      carryLabel.visible = !!loose;
+      if (loose) carryLabel.position.set(prop.position.x, prop.position.y + 1.4, prop.position.z);
+    }
+    if (carryHintEl) {
+      carryHintEl.style.display = result.hint ? 'block' : 'none';
+      carryHintEl.textContent = result.hint || '';
+    }
+    if (carryBtn) {
+      const show = result.phase === 'holding' || result.phase === 'placing' || result.phase === 'reaching' || inRange;
+      carryBtn.style.display = show ? 'block' : 'none';
+      carryBtn.textContent = (result.phase === 'holding' || result.phase === 'placing') ? 'Place' : 'Pick up';
     }
   }
 
   function updateCamera() {
-    const dist = 6.2, height = 3.0;
+    const body = playerPos.y || 1.2;
+    const dist = 6.4 + Math.max(0, body - 1.2) * 2.4;
+    const height = 2.35 + body * 0.55;
     const offset = new THREE.Vector3(-Math.sin(yaw) * dist, height + Math.sin(pitch) * 1.8, -Math.cos(yaw) * dist);
     const desired = new THREE.Vector3().copy(playerPos).add(offset);
     camera.position.lerp(desired, 0.12);
-    camera.lookAt(playerPos.x, playerPos.y + 1.0, playerPos.z);
+    camera.lookAt(playerPos.x, playerPos.y + 0.45, playerPos.z);
   }
 
   function updateGuards(dt) {
@@ -715,16 +787,10 @@
         g.mesh.position.x += g.dir * g.speed * dt;
         if (g.mesh.position.x > g.max) g.dir = -1;
         if (g.mesh.position.x < g.min) g.dir = 1;
-      }
-      // Living NPC idle-walk cycle (Peter)
-      if (g.animTexs && g.animTexs.length > 1 && g.mesh) {
-        g.animT = (g.animT || 0) + dt;
-        if (g.animT > 0.45) {
-          g.animT = 0;
-          g.animI = ((g.animI || 0) + 1) % g.animTexs.length;
-          g.mesh.material.map = g.animTexs[g.animI];
-          g.mesh.material.needsUpdate = true;
-        }
+        window.PaulCharacters.faceDirection(g.mesh, g.dir, 0);
+        window.PaulCharacters.updateWalk(g.mesh, dt, true, g.speed);
+      } else if (g.mesh) {
+        window.PaulCharacters.updateWalk(g.mesh, dt, false);
       }
     });
   }
@@ -736,7 +802,7 @@
     hideZones.forEach(z => {
       if (Math.abs(playerPos.x - z.x) < z.rx && Math.abs(playerPos.z - z.z) < z.rz) isHidden = true;
     });
-    playerMesh.material.opacity = isHidden ? 0.5 : 1;
+    window.PaulCharacters.setOpacity(playerMesh, isHidden ? 0.45 : 1);
     if (isHidden && statusEl && !gameWon) {
       statusEl.innerHTML = '<span style="color:#90ee90">Hidden — guards cannot see you</span>';
       if (window.PaulSFX && !playerMesh.userData.wasHidden) window.PaulSFX.hide();
@@ -818,6 +884,8 @@
       renderer = null;
     }
     scene = null; camera = null; playerMesh = null; npcs = [];
+    carryState = null; carryLabel = null; carryHintEl = null; carryBtn = null;
+    grabQueued = false;
     const ui = document.getElementById('adv3d-ui');
     if (ui) ui.remove();
     if (window.PaulMobile) window.PaulMobile.remove();
