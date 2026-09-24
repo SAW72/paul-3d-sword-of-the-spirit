@@ -20,9 +20,10 @@
   let pointerLocked = false;
   let carryState = null, carryLabel = null, carryHintEl = null, carryBtn = null;
   let nearJarUntil = 0;
+  let holdStartedAt = 0;
   let catchCooldown = 0;
   let playerFill = null;
-  const JAR_HOME = { x: 60.6, z: 3.25 };
+  const JAR_HOME = { x: 60.6, z: 3.85 };
 
   const SPEED = 8.5;
   const WORLD_LEN = 80;
@@ -67,6 +68,7 @@
     carryHintEl = document.getElementById('td-carry-hint');
     carryBtn = document.getElementById('td-carry-btn');
     nearJarUntil = 0;
+    holdStartedAt = 0;
     if (carryBtn) {
       carryBtn.addEventListener('click', function (e) {
         e.preventDefault();
@@ -273,7 +275,7 @@
 
     // Input
     keys = {};
-    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('keyup', onKeyUp);
     renderer.domElement.addEventListener('click', () => {
       if (!renderer || !renderer.domElement) return;
@@ -290,10 +292,13 @@
     statusEl.innerHTML = 'Click the view to look around • <b>WASD</b> move • <b>E</b> pick up the jar by the gate • Hide behind stalls • Reach the <span style="color:#2ecc71">green gate</span>';
   }
 
+  function isGrabKey(e) {
+    return e.code === 'KeyE' || e.key === 'e' || e.key === 'E';
+  }
   function onKeyDown(e) {
     keys[e.code] = true;
-    if (e.code === 'KeyE' && !e.repeat) commitGrab();
-    if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyE'].includes(e.code)) {
+    if (isGrabKey(e) && !e.repeat) commitGrab();
+    if (isGrabKey(e) || ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) {
       e.preventDefault();
     }
   }
@@ -385,7 +390,7 @@
     carryState.prop.getWorldPosition(_jarPos);
     const dx = player.position.x - _jarPos.x;
     const dz = player.position.z - _jarPos.z;
-    return Math.hypot(dx, dz) < 2.8;
+    return Math.hypot(dx, dz) < 3.2;
   }
 
   function carryContext(pressed) {
@@ -424,7 +429,11 @@
 
   function commitGrab() {
     if (!carryState || !window.PaulCharacters.stepCarry || gameWon || !playerMesh) return;
+    const phase = carryState.phase;
+    const holding = phase === 'holding' || phase === 'placing' || phase === 'reaching';
+    if (holding && performance.now() - holdStartedAt < 650) return;
     const result = window.PaulCharacters.stepCarry(carryState, 0, carryContext(true));
+    if (result && result.event === 'grabbed') holdStartedAt = performance.now();
     applyCarryResult(result);
     if (playerMesh) window.PaulCharacters.updateWalk(playerMesh, 0, false, 0);
   }
@@ -572,7 +581,7 @@
       cancelAnimationFrame(animationId);
       animationId = null;
     }
-    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('keydown', onKeyDown, true);
     window.removeEventListener('keyup', onKeyUp);
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('pointerlockchange', onPointerLock);
@@ -594,6 +603,7 @@
     carryHintEl = null;
     carryBtn = null;
     nearJarUntil = 0;
+    holdStartedAt = 0;
     playerFill = null;
     catchCooldown = 0;
     const ui = document.getElementById('td-ui');

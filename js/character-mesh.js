@@ -648,11 +648,11 @@
       return true;
     }
     if (mode === 'hold') {
-      // Both hands meet in front of the chest around the jar.
-      R.rotation.set(-1.05, 0, -0.55);
-      RE.rotation.set(0.08, 0, 0);
-      L.rotation.set(-1.05, 0, 0.55);
-      LE.rotation.set(0.08, 0, 0);
+      // Hands close on the jar socket at the right-front of the chest.
+      R.rotation.set(-1.25, 0.35, -0.15);
+      RE.rotation.set(1.05, 0, 0);
+      L.rotation.set(-1.35, -0.55, 0.95);
+      LE.rotation.set(0.85, 0, 0);
       if (rig && Math.abs(rig.position.z) > 0.02) {
         rig.position.z = 0;
         rig.rotation.x = 0.05;
@@ -796,16 +796,33 @@
     return { prop: prop, phase: 'idle', timer: 0 };
   }
 
+  function carrySocket(mesh) {
+    if (!mesh || !mesh.userData) return null;
+    if (mesh.userData.carrySocket) return mesh.userData.carrySocket;
+    const rig = mesh.userData.rig;
+    if (!rig) return mesh.userData.rightHand || null;
+    const socket = new THREE.Group();
+    socket.name = 'carry-socket';
+    // Right-front of the chest, outside the tunic, so the chase camera
+    // sees the jar instead of a pot hidden on the far side of the body.
+    socket.position.set(0.58, 0.22, 0.42);
+    rig.add(socket);
+    mesh.userData.carrySocket = socket;
+    return socket;
+  }
+
   function attachProp(playerMesh, prop) {
-    const hand = playerMesh.userData.rightHand;
-    if (!hand || !prop) return false;
-    hand.attach(prop);
+    const socket = carrySocket(playerMesh);
+    if (!socket || !prop) return false;
+    socket.attach(prop);
     const s = playerMesh.scale.x || 1;
-    prop.scale.setScalar(1 / s);
-    const grip = prop.userData.grip || { x: 0, y: -0.1, z: 0.12, rx: 0, ry: 0, rz: 0 };
-    prop.position.set(grip.x, grip.y, grip.z);
-    prop.rotation.set(grip.rx || 0, grip.ry || 0, grip.rz || 0);
+    prop.scale.setScalar(1.15 / s);
+    prop.position.set(0, -0.28, 0);
+    prop.rotation.set(0.15, 0.4, 0.1);
     if (prop.userData.marker) prop.userData.marker.visible = false;
+    if (prop.userData.bodyMat) {
+      prop.userData.bodyMat.emissiveIntensity = 0.72;
+    }
     return true;
   }
 
@@ -833,6 +850,7 @@
     const y = worldPos && worldPos.y != null ? worldPos.y : 0;
     prop.position.set(worldPos.x, y, worldPos.z);
     if (prop.userData.marker) prop.userData.marker.visible = true;
+    if (prop.userData.bodyMat) prop.userData.bodyMat.emissiveIntensity = 0.16;
     restorePropMaterials(prop);
   }
 
@@ -867,7 +885,7 @@
     }
 
     let hint = '';
-    if (state.phase === 'holding') hint = 'Holding the water jar — E or Place to set it down';
+    if (state.phase === 'holding') hint = 'HOLDING THE WATER JAR IN YOUR HANDS — press E to place it';
     else if (ctx.inRange) hint = 'E or Pick up — grab the water jar';
     return { hint: hint, event: event, phase: state.phase };
   }

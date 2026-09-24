@@ -14,9 +14,10 @@
   let SPEED = 8.5;
   let carryState = null, carryLabel = null, carryHintEl = null, carryBtn = null;
   let nearJarUntil = 0;
+  let holdStartedAt = 0;
   let catchCooldown = 0;
   let playerFill = null;
-  const JAR_HOME = { x: 60.6, z: 3.25 };
+  const JAR_HOME = { x: 60.6, z: 3.85 };
 
   const LEVELS = {
     1: {
@@ -155,7 +156,7 @@
       </div>
       <div id="adv-lives" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.75);color:#ff6b6b;padding:10px 14px;border-radius:10px;font-size:18px;font-weight:bold;">❤️ ${lives}</div>
       <div id="adv-carry" style="position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;">
-        <div id="adv-carry-hint" style="display:none;background:rgba(0,0,0,0.78);color:#e8d5a3;border:1px solid rgba(232,197,71,0.45);border-radius:10px;padding:8px 14px;font-size:14px;font-weight:600;"></div>
+        <div id="adv-carry-hint" style="display:none;background:rgba(0,0,0,0.88);color:#ffe7a0;border:2px solid #e8c547;border-radius:10px;padding:10px 16px;font-size:18px;font-weight:800;text-align:center;max-width:520px;"></div>
         <button id="adv-carry-btn" type="button" style="display:none;pointer-events:auto;background:#c9a227;color:#1a1208;border:none;border-radius:12px;padding:10px 18px;font-weight:700;font-size:15px;cursor:pointer;font-family:Inter,sans-serif;">Pick up</button>
       </div>
       <div style="position:absolute;top:50%;left:50%;width:10px;height:10px;margin:-5px;border:2px solid rgba(232,197,71,0.5);border-radius:50%;"></div>
@@ -167,6 +168,7 @@
     carryHintEl = document.getElementById('adv-carry-hint');
     carryBtn = document.getElementById('adv-carry-btn');
     nearJarUntil = 0;
+    holdStartedAt = 0;
     if (carryBtn) {
       carryBtn.addEventListener('click', function (e) {
         e.preventDefault();
@@ -240,7 +242,7 @@
 
     // Input — desktop pointer lock + Safari/mobile-safe drag look
     keys = {};
-    window.addEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
     window.addEventListener('keyup', onKeyUp);
     const isTouch = (window.PaulMobile && window.PaulMobile.isTouch && window.PaulMobile.isTouch()) ||
       ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
@@ -626,10 +628,13 @@
     return spr;
   }
 
+  function isGrabKey(e) {
+    return e.code === 'KeyE' || e.key === 'e' || e.key === 'E';
+  }
   function onKey(e) {
     keys[e.code] = true;
-    if (e.code === 'KeyE' && !e.repeat) commitGrab();
-    if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyE'].includes(e.code)) e.preventDefault();
+    if (isGrabKey(e) && !e.repeat) commitGrab();
+    if (isGrabKey(e) || ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
   }
   function onKeyUp(e) { keys[e.code] = false; }
   function onPointerLock() {
@@ -728,7 +733,7 @@
     carryState.prop.getWorldPosition(_jarPos);
     const dx = playerPos.x - _jarPos.x;
     const dz = playerPos.z - _jarPos.z;
-    return Math.hypot(dx, dz) < 2.8;
+    return Math.hypot(dx, dz) < 3.2;
   }
 
   function carryContext(pressed) {
@@ -772,7 +777,12 @@
 
   function commitGrab() {
     if (!carryState || !window.PaulCharacters.stepCarry || !playerMesh || frozen || gameWon) return;
+    const phase = carryState.phase;
+    const holding = phase === 'holding' || phase === 'placing' || phase === 'reaching';
+    // One press must not both grab and drop. A second E after this window places.
+    if (holding && performance.now() - holdStartedAt < 650) return;
     const result = window.PaulCharacters.stepCarry(carryState, 0, carryContext(true));
+    if (result && result.event === 'grabbed') holdStartedAt = performance.now();
     applyCarryResult(result);
     if (playerMesh) window.PaulCharacters.updateWalk(playerMesh, 0, false, 0);
   }
@@ -934,7 +944,7 @@
 
   function destroyAdventure3D() {
     if (animId) { cancelAnimationFrame(animId); animId = null; }
-    window.removeEventListener('keydown', onKey);
+    window.removeEventListener('keydown', onKey, true);
     window.removeEventListener('keyup', onKeyUp);
     document.removeEventListener('mousemove', onMouse);
     document.removeEventListener('pointerlockchange', onPointerLock);
@@ -949,6 +959,7 @@
     scene = null; camera = null; playerMesh = null; npcs = [];
     carryState = null; carryLabel = null; carryHintEl = null; carryBtn = null;
     nearJarUntil = 0;
+    holdStartedAt = 0;
     playerFill = null;
     catchCooldown = 0;
     const ui = document.getElementById('adv3d-ui');
