@@ -6,12 +6,15 @@
 (function () {
   let renderer, scene, camera, clock, animId;
   let playerMesh, playerPos, animT = 0;
-  let keys = {}, yaw = 0, pitch = 0.2, pointerLocked = false;
+  let keys = {}, yaw = Math.PI / 2, pitch = 0.2, pointerLocked = false;
   let npcs = [], hideZones = [], goalZone = null, interactZone = null;
   let isHidden = false, frozen = false, gameWon = false, lives = 3;
   let statusEl, livesEl, container, currentLevel = 1;
   let onComplete, onLifeLost, onGameOver, onInteract;
   let SPEED = 8.5;
+  let carryState = null, carryLabel = null, carryHintEl = null, carryBtn = null;
+  let grabQueued = false;
+  const JAR_HOME = { x: 62.2, z: 2.35 };
 
   const LEVELS = {
     1: {
@@ -19,11 +22,12 @@
       player: 'disciple',
       walk: true,
       theme: 'night',
-      objective: 'Reach the City Gate. Hide behind stalls from guards.',
+      objective: 'Reach the City Gate. Hide behind stalls. Near the gate, press E to pick up the water jar and E again to place it.',
       start: { x: 2, z: 0 },
       goal: { x: 68, z: 0, r: 3.5, label: 'CITY GATE' },
       guards: true,
-      hide: true
+      hide: true,
+      pickup: true
     },
     2: {
       name: 'Damascus – Ananias',
@@ -143,12 +147,26 @@
         <span style="opacity:0.85">Click/tap view • WASD or left stick • Mouse / LOOK pad</span>
       </div>
       <div id="adv-lives" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.75);color:#ff6b6b;padding:10px 14px;border-radius:10px;font-size:18px;font-weight:bold;">❤️ ${lives}</div>
+      <div id="adv-carry" style="position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;">
+        <div id="adv-carry-hint" style="display:none;background:rgba(0,0,0,0.78);color:#e8d5a3;border:1px solid rgba(232,197,71,0.45);border-radius:10px;padding:8px 14px;font-size:14px;font-weight:600;"></div>
+        <button id="adv-carry-btn" type="button" style="display:none;pointer-events:auto;background:#c9a227;color:#1a1208;border:none;border-radius:12px;padding:10px 18px;font-weight:700;font-size:15px;cursor:pointer;font-family:Inter,sans-serif;">Pick up</button>
+      </div>
       <div style="position:absolute;top:50%;left:50%;width:10px;height:10px;margin:-5px;border:2px solid rgba(232,197,71,0.5);border-radius:50%;"></div>
     `;
     container.style.position = 'relative';
     container.appendChild(ui);
     statusEl = document.getElementById('adv-status');
     livesEl = document.getElementById('adv-lives');
+    carryHintEl = document.getElementById('adv-carry-hint');
+    carryBtn = document.getElementById('adv-carry-btn');
+    grabQueued = false;
+    if (carryBtn) {
+      carryBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        grabQueued = true;
+      });
+    }
     // Mobile controls + unlock audio
     if (window.PaulMobile) window.PaulMobile.create(container);
     if (window.PaulAudio) window.PaulAudio.unlock();
@@ -192,6 +210,7 @@
 
     buildWorld(cfg);
     buildPlayer(cfg);
+    if (cfg.pickup) buildPickup(cfg);
     if (cfg.guards) buildGuards(cfg);
     if (cfg.npc) buildNPC(cfg);
 
@@ -512,12 +531,36 @@
     }
   }
 
+  function buildPickup(cfg) {
+    if (!window.PaulCharacters.createWaterJar) return;
+    const jar = window.PaulCharacters.createWaterJar();
+    jar.position.set(JAR_HOME.x, 0.36, JAR_HOME.z);
+    scene.add(jar);
+    carryState = window.PaulCharacters.createCarryState(jar);
+
+    const plinth = new THREE.Mesh(
+      new THREE.BoxGeometry(1.05, 0.36, 0.78),
+      new THREE.MeshStandardMaterial({ color: 0x6d675c, roughness: 0.92 })
+    );
+    plinth.position.set(JAR_HOME.x, 0.18, JAR_HOME.z);
+    plinth.castShadow = true;
+    plinth.receiveShadow = true;
+    scene.add(plinth);
+
+    const lamp = new THREE.PointLight(0xffb060, 0.7, 7, 1.4);
+    lamp.position.set(JAR_HOME.x, 1.4, JAR_HOME.z);
+    scene.add(lamp);
+
+    carryLabel = addFloatingLabel(JAR_HOME.x, 1.55, JAR_HOME.z, 'WATER JAR', '#e8c547');
+  }
+
   function buildPlayer(cfg) {
     const role = cfg.player || 'paul';
-    playerMesh = window.PaulCharacters.create(role);
+    const scale = currentLevel === 1 ? 1.16 : 1;
+    playerMesh = window.PaulCharacters.create(role, { scale: scale });
     playerPos = new THREE.Vector3(cfg.start.x, playerMesh.userData.centerY, cfg.start.z);
     playerMesh.position.copy(playerPos);
-    window.PaulCharacters.faceDirection(playerMesh, 0, 1);
+    window.PaulCharacters.faceDirection(playerMesh, 1, 0);
     scene.add(playerMesh);
   }
 
@@ -571,11 +614,13 @@
     spr.position.set(x, y, z);
     spr.scale.set(4, 1, 1);
     scene.add(spr);
+    return spr;
   }
 
   function onKey(e) {
     keys[e.code] = true;
-    if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+    if (e.code === 'KeyE' && !e.repeat) grabQueued = true;
+    if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyE'].includes(e.code)) e.preventDefault();
   }
   function onKeyUp(e) { keys[e.code] = false; }
   function onMouse(e) {
@@ -642,7 +687,8 @@
       playerPos.x = Math.max(1, Math.min(72, playerPos.x));
       playerPos.z = Math.max(-4.2, Math.min(4.2, playerPos.z));
       playerMesh.position.copy(playerPos);
-      window.PaulCharacters.faceDirection(playerMesh, dir.x, dir.z);
+      const reachingJar = carryState && (carryState.phase === 'reaching' || (grabQueued && jarInRange()));
+      if (!reachingJar) window.PaulCharacters.faceDirection(playerMesh, dir.x, dir.z);
 
       animT += dt;
       if (animT > 0.32) {
@@ -650,15 +696,89 @@
         if (window.PaulSFX) window.PaulSFX.step();
       }
     }
+    updateCarry(dt, moving);
     window.PaulCharacters.updateWalk(playerMesh, dt, moving, SPEED);
   }
 
+  function jarInRange() {
+    if (!carryState || !carryState.prop) return false;
+    if (carryState.phase === 'holding' || carryState.phase === 'placing') return false;
+    if (carryState.prop.parent !== scene) return false;
+    const p = carryState.prop.position;
+    const dx = playerPos.x - p.x;
+    const dz = playerPos.z - p.z;
+    return Math.hypot(dx, dz) < 1.75;
+  }
+
+  function placePoint() {
+    const yawC = playerMesh.rotation.y;
+    let x = playerPos.x + Math.sin(yawC) * 1.3;
+    let z = playerPos.z + Math.cos(yawC) * 1.3;
+    x = Math.max(1.2, Math.min(70.5, x));
+    z = Math.max(-4.0, Math.min(4.0, z));
+    return { x: x, y: 0, z: z };
+  }
+
+  function updateCarry(dt) {
+    if (!carryState || !window.PaulCharacters.stepCarry || frozen || gameWon) return;
+    const inRange = jarInRange();
+    if (carryState.phase === 'reaching' || (grabQueued && inRange)) {
+      const p = carryState.prop.position;
+      if (carryState.prop.parent === scene) {
+        window.PaulCharacters.faceDirection(playerMesh, p.x - playerPos.x, p.z - playerPos.z);
+        const dx = p.x - playerPos.x;
+        const dz = p.z - playerPos.z;
+        const dist = Math.hypot(dx, dz) || 1;
+        const want = 0.98;
+        if (dist > want) {
+          const step = Math.min(dist - want, 7 * dt);
+          playerPos.x += (dx / dist) * step;
+          playerPos.z += (dz / dist) * step;
+          playerPos.x = Math.max(1, Math.min(72, playerPos.x));
+          playerPos.z = Math.max(-4.2, Math.min(4.2, playerPos.z));
+          playerMesh.position.copy(playerPos);
+        }
+      }
+    }
+    const pressed = grabQueued;
+    grabQueued = false;
+    const result = window.PaulCharacters.stepCarry(carryState, dt, {
+      pressed: pressed,
+      inRange: inRange,
+      playerMesh: playerMesh,
+      scene: scene,
+      placeAt: placePoint()
+    });
+    if (result.event === 'grabbed' && window.PaulSFX) window.PaulSFX.goal();
+    if (result.event === 'placed' && window.PaulSFX) window.PaulSFX.click();
+    const prop = carryState.prop;
+    if (prop && prop.userData.bodyMat && prop.parent === scene) {
+      prop.userData.bodyMat.emissiveIntensity = inRange ? 0.45 : 0.16;
+    }
+    if (carryLabel) {
+      const loose = prop && prop.parent === scene;
+      carryLabel.visible = !!loose;
+      if (loose) carryLabel.position.set(prop.position.x, prop.position.y + 1.4, prop.position.z);
+    }
+    if (carryHintEl) {
+      carryHintEl.style.display = result.hint ? 'block' : 'none';
+      carryHintEl.textContent = result.hint || '';
+    }
+    if (carryBtn) {
+      const show = result.phase === 'holding' || result.phase === 'placing' || result.phase === 'reaching' || inRange;
+      carryBtn.style.display = show ? 'block' : 'none';
+      carryBtn.textContent = (result.phase === 'holding' || result.phase === 'placing') ? 'Place' : 'Pick up';
+    }
+  }
+
   function updateCamera() {
-    const dist = 6.2, height = 3.0;
+    const body = playerPos.y || 1.2;
+    const dist = 6.4 + Math.max(0, body - 1.2) * 2.4;
+    const height = 2.35 + body * 0.55;
     const offset = new THREE.Vector3(-Math.sin(yaw) * dist, height + Math.sin(pitch) * 1.8, -Math.cos(yaw) * dist);
     const desired = new THREE.Vector3().copy(playerPos).add(offset);
     camera.position.lerp(desired, 0.12);
-    camera.lookAt(playerPos.x, playerPos.y + 1.0, playerPos.z);
+    camera.lookAt(playerPos.x, playerPos.y + 0.45, playerPos.z);
   }
 
   function updateGuards(dt) {
@@ -764,6 +884,8 @@
       renderer = null;
     }
     scene = null; camera = null; playerMesh = null; npcs = [];
+    carryState = null; carryLabel = null; carryHintEl = null; carryBtn = null;
+    grabQueued = false;
     const ui = document.getElementById('adv3d-ui');
     if (ui) ui.remove();
     if (window.PaulMobile) window.PaulMobile.remove();

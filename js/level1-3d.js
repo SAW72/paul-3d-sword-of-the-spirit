@@ -9,7 +9,7 @@
   let player, playerMesh, animTime = 0;
   let guards = [];
   let keys = {};
-  let yaw = 0, pitch = 0.25;
+  let yaw = Math.PI / 2, pitch = 0.25;
   let isHidden = false, gameWon = false, lives = 3;
   let statusEl, livesEl, container;
   let onComplete, onLifeLost, onGameOver;
@@ -18,6 +18,9 @@
   let direction = new THREE.Vector3();
   let animationId = null;
   let pointerLocked = false;
+  let carryState = null, carryLabel = null, carryHintEl = null, carryBtn = null;
+  let grabQueued = false;
+  const JAR_HOME = { x: 62.2, z: 2.35 };
 
   const SPEED = 8.5;
   const WORLD_LEN = 80;
@@ -44,12 +47,26 @@
         Click the game to capture mouse • WASD move • Mouse look • Hide in stalls • Reach the green gate
       </div>
       <div id="td-lives" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.7);color:#ff6b6b;padding:10px 14px;border-radius:10px;font-size:18px;font-weight:bold;">❤️ ${lives}</div>
+      <div id="td-carry" style="position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <div id="td-carry-hint" style="display:none;background:rgba(0,0,0,0.78);color:#e8d5a3;border:1px solid rgba(232,197,71,0.45);border-radius:10px;padding:8px 14px;font-size:14px;font-weight:600;"></div>
+        <button id="td-carry-btn" type="button" style="display:none;pointer-events:auto;background:#c9a227;color:#1a1208;border:none;border-radius:12px;padding:10px 18px;font-weight:700;font-size:15px;cursor:pointer;">Pick up</button>
+      </div>
       <div id="td-cross" style="position:absolute;top:50%;left:50%;width:8px;height:8px;margin:-4px;border:2px solid rgba(232,197,71,0.6);border-radius:50%;pointer-events:none;"></div>
     `;
     container.style.position = 'relative';
     container.appendChild(ui);
     statusEl = document.getElementById('td-status');
     livesEl = document.getElementById('td-lives');
+    carryHintEl = document.getElementById('td-carry-hint');
+    carryBtn = document.getElementById('td-carry-btn');
+    grabQueued = false;
+    if (carryBtn) {
+      carryBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        grabQueued = true;
+      });
+    }
 
     // Three.js setup
     const w = container.clientWidth || 960;
@@ -181,6 +198,25 @@
       scene.add(canopy);
     });
 
+    // Water jar by the gate — pick up with E, place with E
+    if (window.PaulCharacters.createWaterJar) {
+      const jar = window.PaulCharacters.createWaterJar();
+      jar.position.set(JAR_HOME.x, 0.36, JAR_HOME.z);
+      scene.add(jar);
+      carryState = window.PaulCharacters.createCarryState(jar);
+      const plinth = new THREE.Mesh(
+        new THREE.BoxGeometry(1.05, 0.36, 0.78),
+        new THREE.MeshStandardMaterial({ color: 0x6d675c, roughness: 0.92 })
+      );
+      plinth.position.set(JAR_HOME.x, 0.18, JAR_HOME.z);
+      plinth.castShadow = true;
+      plinth.receiveShadow = true;
+      scene.add(plinth);
+      const jarLight = new THREE.PointLight(0xffb060, 0.7, 7, 1.4);
+      jarLight.position.set(JAR_HOME.x, 1.4, JAR_HOME.z);
+      scene.add(jarLight);
+    }
+
     // City Gate (win)
     const gateMat = new THREE.MeshStandardMaterial({ color: 0x1a5c2e, emissive: 0x0a3a1a, emissiveIntensity: 0.4 });
     gateMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 5, 4), gateMat);
@@ -192,10 +228,10 @@
     gateLight.position.set(66, 3, 0);
     scene.add(gateLight);
 
-    // Player – low-poly 3D disciple (shared mesh helper)
-    playerMesh = window.PaulCharacters.create('disciple');
+    // Player – fuller low-poly disciple, a bit larger than the alley NPCs
+    playerMesh = window.PaulCharacters.create('disciple', { scale: 1.16 });
     playerMesh.position.set(2, playerMesh.userData.centerY, 0);
-    window.PaulCharacters.faceDirection(playerMesh, 0, 1);
+    window.PaulCharacters.faceDirection(playerMesh, 1, 0);
     scene.add(playerMesh);
 
     // Invisible body for collision / logic
@@ -242,12 +278,13 @@
 
     // Start loop
     animationId = requestAnimationFrame(animate);
-    statusEl.innerHTML = 'Click the view to look around • <b>WASD</b> move • Hide behind stalls • Reach the <span style="color:#2ecc71">green gate</span>';
+    statusEl.innerHTML = 'Click the view to look around • <b>WASD</b> move • <b>E</b> pick up the jar by the gate • Hide behind stalls • Reach the <span style="color:#2ecc71">green gate</span>';
   }
 
   function onKeyDown(e) {
     keys[e.code] = true;
-    if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) {
+    if (e.code === 'KeyE' && !e.repeat) grabQueued = true;
+    if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyE'].includes(e.code)) {
       e.preventDefault();
     }
   }
@@ -305,7 +342,8 @@
       // Clamp inside alley
       player.position.x = Math.max(1, Math.min(WORLD_LEN - 2, player.position.x));
       player.position.z = Math.max(-4.5, Math.min(4.5, player.position.z));
-      window.PaulCharacters.faceDirection(playerMesh, direction.x, direction.z);
+      const reachingJar = carryState && (carryState.phase === 'reaching' || (grabQueued && jarInRange()));
+      if (!reachingJar) window.PaulCharacters.faceDirection(playerMesh, direction.x, direction.z);
 
       animTime += dt;
       if (animTime > 0.32) {
@@ -316,19 +354,85 @@
 
     // Keep feet on ground
     player.position.y = playerMesh.userData.centerY;
+    updateCarry(dt);
     window.PaulCharacters.updateWalk(playerMesh, dt, moving, SPEED);
   }
 
+  function jarInRange() {
+    if (!carryState || !carryState.prop || !scene) return false;
+    if (carryState.phase === 'holding' || carryState.phase === 'placing') return false;
+    if (carryState.prop.parent !== scene) return false;
+    const p = carryState.prop.position;
+    const dx = player.position.x - p.x;
+    const dz = player.position.z - p.z;
+    return Math.hypot(dx, dz) < 1.75;
+  }
+
+  function placePoint() {
+    const yawC = playerMesh.rotation.y;
+    let x = player.position.x + Math.sin(yawC) * 1.3;
+    let z = player.position.z + Math.cos(yawC) * 1.3;
+    x = Math.max(1.2, Math.min(WORLD_LEN - 4, x));
+    z = Math.max(-4.0, Math.min(4.0, z));
+    return { x: x, y: 0, z: z };
+  }
+
+  function updateCarry(dt) {
+    if (!carryState || !window.PaulCharacters.stepCarry || gameWon) return;
+    const inRange = jarInRange();
+    if (carryState.phase === 'reaching' || (grabQueued && inRange)) {
+      const p = carryState.prop.position;
+      if (carryState.prop.parent === scene) {
+        window.PaulCharacters.faceDirection(playerMesh, p.x - player.position.x, p.z - player.position.z);
+        const dx = p.x - player.position.x;
+        const dz = p.z - player.position.z;
+        const dist = Math.hypot(dx, dz) || 1;
+        const want = 0.98;
+        if (dist > want) {
+          const step = Math.min(dist - want, 7 * dt);
+          player.position.x += (dx / dist) * step;
+          player.position.z += (dz / dist) * step;
+          player.position.x = Math.max(1, Math.min(WORLD_LEN - 2, player.position.x));
+          player.position.z = Math.max(-4.5, Math.min(4.5, player.position.z));
+        }
+      }
+    }
+    const pressed = grabQueued;
+    grabQueued = false;
+    const result = window.PaulCharacters.stepCarry(carryState, dt, {
+      pressed: pressed,
+      inRange: inRange,
+      playerMesh: playerMesh,
+      scene: scene,
+      placeAt: placePoint()
+    });
+    if (result.event === 'grabbed' && window.PaulSFX) window.PaulSFX.goal();
+    if (result.event === 'placed' && window.PaulSFX) window.PaulSFX.click();
+    const prop = carryState.prop;
+    if (prop && prop.userData.bodyMat && prop.parent === scene) {
+      prop.userData.bodyMat.emissiveIntensity = inRange ? 0.45 : 0.16;
+    }
+    if (carryHintEl) {
+      carryHintEl.style.display = result.hint ? 'block' : 'none';
+      carryHintEl.textContent = result.hint || '';
+    }
+    if (carryBtn) {
+      const show = result.phase === 'holding' || result.phase === 'placing' || result.phase === 'reaching' || inRange;
+      carryBtn.style.display = show ? 'block' : 'none';
+      carryBtn.textContent = (result.phase === 'holding' || result.phase === 'placing') ? 'Place' : 'Pick up';
+    }
+  }
+
   function updateCamera() {
-    // Third-person camera behind player
-    const dist = 6.5;
-    const height = 3.2;
+    const body = player.position.y || 1.2;
+    const dist = 6.5 + Math.max(0, body - 1.2) * 2.4;
+    const height = 2.5 + body * 0.5;
     const offset = new THREE.Vector3(
       -Math.sin(yaw) * dist,
       height + Math.sin(pitch) * 2,
       -Math.cos(yaw) * dist
     );
-    const target = new THREE.Vector3().copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+    const target = new THREE.Vector3().copy(player.position).add(new THREE.Vector3(0, 0.45, 0));
     const desired = new THREE.Vector3().copy(player.position).add(offset);
     camera.position.lerp(desired, 0.12);
     camera.lookAt(target);
@@ -364,7 +468,7 @@
     } else {
       window.PaulCharacters.setOpacity(playerMesh, 1);
       if (statusEl && !gameWon && !statusEl.innerHTML.includes('Caught')) {
-        statusEl.innerHTML = 'WASD move • Mouse look • Hide in stalls • Reach the <span style="color:#2ecc71">green gate</span>';
+        statusEl.innerHTML = 'WASD move • <b>E</b> grabs or places the water jar • Hide in stalls • Reach the <span style="color:#2ecc71">green gate</span>';
       }
     }
   }
@@ -438,6 +542,10 @@
     player = null;
     playerMesh = null;
     guards = [];
+    carryState = null;
+    carryHintEl = null;
+    carryBtn = null;
+    grabQueued = false;
     const ui = document.getElementById('td-ui');
     if (ui) ui.remove();
   }

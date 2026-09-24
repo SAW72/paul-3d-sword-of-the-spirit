@@ -1,5 +1,5 @@
 /* PAUL-3D-SWORD-2026 service worker — offline cache */
-const CACHE = 'paul-3d-sword-v3';
+const CACHE = 'paul-3d-sword-v4';
 const ASSETS = [
   './',
   './index.html',

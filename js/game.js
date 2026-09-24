@@ -89,7 +89,7 @@ const levels = [
     location: "Jerusalem – Alleys & House Church",
     lives: true,
     portrait: 'disciple',
-    intro: `You are a young disciple in Jerusalem. Saul’s men are searching street by street. The house church is no longer safe.<br><br>You must sneak through the alleys, hide behind market stalls, and slip out the city gate before they catch you.<br><br><strong>Three lives. No verses needed. Just timing and quick feet.</strong>`,
+    intro: `You are a young disciple in Jerusalem. Saul’s men are searching street by street. The house church is no longer safe.<br><br>You must sneak through the alleys, hide behind market stalls, and slip out the city gate before they catch you. A clay water jar sits on a stone by the gate — press <strong>E</strong> (or Pick up) to grab it, then <strong>E</strong> again to place it.<br><br><strong>Three lives. No verses needed. Just timing and quick feet.</strong>`,
     type: "stealth"
   },
   {
