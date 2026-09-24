@@ -19,7 +19,7 @@
   let animationId = null;
   let pointerLocked = false;
   let carryState = null, carryLabel = null, carryHintEl = null, carryBtn = null;
-  let grabQueued = false;
+  let nearJarUntil = 0;
   let catchCooldown = 0;
   let playerFill = null;
   const JAR_HOME = { x: 60.6, z: 3.25 };
@@ -66,12 +66,12 @@
     livesEl = document.getElementById('td-lives');
     carryHintEl = document.getElementById('td-carry-hint');
     carryBtn = document.getElementById('td-carry-btn');
-    grabQueued = false;
+    nearJarUntil = 0;
     if (carryBtn) {
       carryBtn.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        grabQueued = true;
+        commitGrab();
       });
     }
 
@@ -292,7 +292,7 @@
 
   function onKeyDown(e) {
     keys[e.code] = true;
-    if (e.code === 'KeyE' && !e.repeat) grabQueued = true;
+    if (e.code === 'KeyE' && !e.repeat) commitGrab();
     if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyE'].includes(e.code)) {
       e.preventDefault();
     }
@@ -347,12 +347,12 @@
     if (keys['KeyA'] || keys['ArrowLeft']) direction.sub(right);
     if (keys['KeyD'] || keys['ArrowRight']) direction.add(right);
 
+    updateCarry(dt);
     const moving = direction.lengthSq() > 0;
     if (moving) {
       direction.normalize();
       parkPlayer(player.position.x + direction.x * SPEED * dt, player.position.z + direction.z * SPEED * dt);
-      const reachingJar = carryState && (carryState.phase === 'reaching' || (grabQueued && jarInRange()));
-      if (!reachingJar) window.PaulCharacters.faceDirection(playerMesh, direction.x, direction.z);
+      window.PaulCharacters.faceDirection(playerMesh, direction.x, direction.z);
 
       animTime += dt;
       if (animTime > 0.32) {
@@ -363,7 +363,6 @@
 
     // Keep feet on ground
     parkPlayer(player.position.x, player.position.z);
-    updateCarry(dt);
     window.PaulCharacters.updateWalk(playerMesh, dt, moving, SPEED);
   }
 
@@ -377,58 +376,38 @@
     player.position.y = isFinite(cy) ? cy : 1.55;
   }
 
+  const _jarPos = new THREE.Vector3();
+
   function jarInRange() {
-    if (!carryState || !carryState.prop || !scene) return false;
-    if (carryState.phase === 'holding' || carryState.phase === 'placing') return false;
+    if (!carryState || !carryState.prop || !scene || !player) return false;
+    if (carryState.phase === 'holding' || carryState.phase === 'placing' || carryState.phase === 'reaching') return false;
     if (carryState.prop.parent !== scene) return false;
-    const p = carryState.prop.position;
-    const dx = player.position.x - p.x;
-    const dz = player.position.z - p.z;
-    return Math.hypot(dx, dz) < 1.75;
+    carryState.prop.getWorldPosition(_jarPos);
+    const dx = player.position.x - _jarPos.x;
+    const dz = player.position.z - _jarPos.z;
+    return Math.hypot(dx, dz) < 2.8;
   }
 
-  function placePoint() {
-    const yawC = playerMesh.rotation.y;
-    let x = player.position.x + Math.sin(yawC) * 1.3;
-    let z = player.position.z + Math.cos(yawC) * 1.3;
-    x = Math.max(1.2, Math.min(WORLD_LEN - 4, x));
-    z = Math.max(-4.0, Math.min(4.0, z));
-    return { x: x, y: 0, z: z };
-  }
-
-  function updateCarry(dt) {
-    if (!carryState || !window.PaulCharacters.stepCarry || gameWon) return;
+  function carryContext(pressed) {
     const inRange = jarInRange();
-    if (carryState.phase === 'reaching' || (grabQueued && inRange)) {
-      const p = carryState.prop.position;
-      if (carryState.prop.parent === scene) {
-        window.PaulCharacters.faceDirection(playerMesh, p.x - player.position.x, p.z - player.position.z);
-        const dx = p.x - player.position.x;
-        const dz = p.z - player.position.z;
-        const dist = Math.hypot(dx, dz) || 1;
-        const want = 0.98;
-        if (dist > want) {
-          const step = Math.min(dist - want, 7 * dt);
-          const nx = player.position.x + (dx / dist) * step;
-          const nz = player.position.z + (dz / dist) * step;
-          const gx = gateMesh ? gateMesh.position.x : 68;
-          const gz = gateMesh ? gateMesh.position.z : 0;
-          if (Math.hypot(nx - gx, nz - gz) >= 3.85) parkPlayer(nx, nz);
-        }
-      }
-    }
-    const pressed = grabQueued;
-    grabQueued = false;
-    const result = window.PaulCharacters.stepCarry(carryState, dt, {
-      pressed: pressed,
+    if (inRange) nearJarUntil = performance.now() + 1000;
+    const near = inRange || performance.now() < nearJarUntil;
+    return {
+      pressed: !!pressed,
+      latched: !!pressed && near,
       inRange: inRange,
       playerMesh: playerMesh,
       scene: scene,
       placeAt: placePoint()
-    });
+    };
+  }
+
+  function applyCarryResult(result) {
+    if (!result || !carryState) return;
     if (result.event === 'grabbed' && window.PaulSFX) window.PaulSFX.goal();
     if (result.event === 'placed' && window.PaulSFX) window.PaulSFX.click();
     const prop = carryState.prop;
+    const inRange = jarInRange();
     if (prop && prop.userData.bodyMat && prop.parent === scene) {
       prop.userData.bodyMat.emissiveIntensity = inRange ? 0.45 : 0.16;
     }
@@ -441,6 +420,34 @@
       carryBtn.style.display = show ? 'block' : 'none';
       carryBtn.textContent = (result.phase === 'holding' || result.phase === 'placing') ? 'Place' : 'Pick up';
     }
+  }
+
+  function commitGrab() {
+    if (!carryState || !window.PaulCharacters.stepCarry || gameWon || !playerMesh) return;
+    const result = window.PaulCharacters.stepCarry(carryState, 0, carryContext(true));
+    applyCarryResult(result);
+    if (playerMesh) window.PaulCharacters.updateWalk(playerMesh, 0, false, 0);
+  }
+
+  function placePoint() {
+    const yawC = playerMesh ? playerMesh.rotation.y : (Math.PI / 2);
+    const gx = gateMesh ? gateMesh.position.x : 68;
+    const gz = gateMesh ? gateMesh.position.z : 0;
+    let x = player.position.x + Math.cos(yawC) * 0.95;
+    let z = player.position.z - Math.sin(yawC) * 0.95;
+    x = Math.max(1.2, Math.min(WORLD_LEN - 4, x));
+    z = Math.max(-3.6, Math.min(3.6, z));
+    if (Math.hypot(x - gx, z - gz) < 4.1) {
+      const side = z >= gz ? 1 : -1;
+      z = Math.max(-3.6, Math.min(3.6, gz + side * 4.25));
+      if (Math.hypot(x - gx, z - gz) < 3.8) x = Math.max(1.2, gx - 4.3);
+    }
+    return { x: x, y: 0, z: z };
+  }
+
+  function updateCarry(dt) {
+    if (!carryState || !window.PaulCharacters.stepCarry || gameWon || !playerMesh) return;
+    applyCarryResult(window.PaulCharacters.stepCarry(carryState, dt, carryContext(false)));
   }
 
   function updateCamera() {
@@ -586,7 +593,7 @@
     carryState = null;
     carryHintEl = null;
     carryBtn = null;
-    grabQueued = false;
+    nearJarUntil = 0;
     playerFill = null;
     catchCooldown = 0;
     const ui = document.getElementById('td-ui');

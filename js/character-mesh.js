@@ -798,7 +798,7 @@
 
   function attachProp(playerMesh, prop) {
     const hand = playerMesh.userData.rightHand;
-    if (!hand || !prop) return;
+    if (!hand || !prop) return false;
     hand.attach(prop);
     const s = playerMesh.scale.x || 1;
     prop.scale.setScalar(1 / s);
@@ -806,6 +806,7 @@
     prop.position.set(grip.x, grip.y, grip.z);
     prop.rotation.set(grip.rx || 0, grip.ry || 0, grip.rz || 0);
     if (prop.userData.marker) prop.userData.marker.visible = false;
+    return true;
   }
 
   function restorePropMaterials(prop) {
@@ -840,50 +841,33 @@
     if (!state || !state.prop || !ctx.playerMesh) return { hint: '', event: null, phase: 'idle' };
     const mesh = ctx.playerMesh;
     let event = null;
-
-    if (state.phase === 'reaching') {
-      mesh.userData.carry = 'reach';
-      state.timer -= dt;
-      if (state.timer <= 0) {
-        if (ctx.inRange) {
-          attachProp(mesh, state.prop);
-          state.phase = 'holding';
-          mesh.userData.carry = 'hold';
-          event = 'grabbed';
-        } else {
-          state.phase = 'idle';
-          mesh.userData.carry = 'none';
-        }
-      }
-    } else if (state.phase === 'placing') {
-      mesh.userData.carry = 'reach';
-      state.timer -= dt;
-      if (state.timer <= 0) {
+    // Grab and place commit on the key/button press. A delayed "reach" that
+    // re-checked distance was cancelled by walking, so the prompt showed and
+    // the jar never stayed in the hands.
+    const holding = state.phase === 'holding' || state.phase === 'reaching' || state.phase === 'placing';
+    if (holding) {
+      if (state.prop.parent === ctx.scene) attachProp(mesh, state.prop);
+      mesh.userData.carry = 'hold';
+      state.phase = 'holding';
+      if (ctx.pressed) {
         detachProp(state.prop, ctx.scene, ctx.placeAt || { x: 0, y: 0, z: 0 });
         state.phase = 'idle';
         mesh.userData.carry = 'none';
         event = 'placed';
       }
-    } else if (state.phase === 'holding') {
-      mesh.userData.carry = 'hold';
-      if (ctx.pressed) {
-        state.phase = 'placing';
-        state.timer = 0.42;
-        mesh.userData.carry = 'reach';
-      }
     } else {
       mesh.userData.carry = 'none';
-      if (ctx.pressed && ctx.inRange) {
-        state.phase = 'reaching';
-        state.timer = 0.48;
-        mesh.userData.carry = 'reach';
+      if (ctx.pressed && (ctx.inRange || ctx.latched)) {
+        if (attachProp(mesh, state.prop)) {
+          state.phase = 'holding';
+          mesh.userData.carry = 'hold';
+          event = 'grabbed';
+        }
       }
     }
 
     let hint = '';
-    if (state.phase === 'reaching') hint = 'Reaching for the water jar…';
-    else if (state.phase === 'placing') hint = 'Setting the jar down…';
-    else if (state.phase === 'holding') hint = 'E or Place — set the water jar down';
+    if (state.phase === 'holding') hint = 'Holding the water jar — E or Place to set it down';
     else if (ctx.inRange) hint = 'E or Pick up — grab the water jar';
     return { hint: hint, event: event, phase: state.phase };
   }
