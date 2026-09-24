@@ -19,8 +19,12 @@
   let animationId = null;
   let pointerLocked = false;
   let carryState = null, carryLabel = null, carryHintEl = null, carryBtn = null;
-  let grabQueued = false;
-  const JAR_HOME = { x: 62.2, z: 2.35 };
+  let nearJarUntil = 0;
+  let holdStartedAt = 0;
+  let catchCooldown = 0;
+  let playerFill = null;
+  const JAR_HOME = { x: 27.0, z: 4.0 };
+  const JAR_REACH = 7.0;
 
   const SPEED = 8.5;
   const WORLD_LEN = 80;
@@ -34,6 +38,11 @@
     lives = startLives || 3;
     gameWon = false;
     isHidden = false;
+    catchCooldown = 0;
+    playerFill = null;
+    yaw = Math.PI / 2;
+    pitch = 0.05;
+    pointerLocked = false;
     onComplete = completeCb;
     onLifeLost = lifeCb;
     onGameOver = gameOverCb;
@@ -59,12 +68,13 @@
     livesEl = document.getElementById('td-lives');
     carryHintEl = document.getElementById('td-carry-hint');
     carryBtn = document.getElementById('td-carry-btn');
-    grabQueued = false;
+    nearJarUntil = 0;
+    holdStartedAt = 0;
     if (carryBtn) {
       carryBtn.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        grabQueued = true;
+        commitGrab();
       });
     }
 
@@ -95,6 +105,9 @@
 
     // Lights
     const ambient = new THREE.AmbientLight(0x667088, 0.72);
+    playerFill = new THREE.PointLight(0xfff1d6, 0.85, 8);
+    playerFill.position.set(2, 3, 0);
+    scene.add(playerFill);
     scene.add(ambient);
 
     // Moon / sky light
@@ -198,7 +211,7 @@
       scene.add(canopy);
     });
 
-    // Water jar by the gate — pick up with E, place with E
+    // Water jar on the +Z wall, before the later guards — pick up with E, place with E
     if (window.PaulCharacters.createWaterJar) {
       const jar = window.PaulCharacters.createWaterJar();
       jar.position.set(JAR_HOME.x, 0.36, JAR_HOME.z);
@@ -212,9 +225,23 @@
       plinth.castShadow = true;
       plinth.receiveShadow = true;
       scene.add(plinth);
-      const jarLight = new THREE.PointLight(0xffb060, 0.7, 7, 1.4);
+      const jarLight = new THREE.PointLight(0xffb060, 0.9, 14, 1.2);
       jarLight.position.set(JAR_HOME.x, 1.4, JAR_HOME.z);
       scene.add(jarLight);
+      const reachRing = new THREE.Mesh(
+        new THREE.RingGeometry(JAR_REACH - 0.55, JAR_REACH - 0.08, 64),
+        new THREE.MeshBasicMaterial({ color: 0xe8c547, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false })
+      );
+      reachRing.rotation.x = -Math.PI / 2;
+      reachRing.position.set(JAR_HOME.x, 0.05, JAR_HOME.z);
+      scene.add(reachRing);
+      const pad = new THREE.Mesh(
+        new THREE.RingGeometry(0.85, 2.15, 40),
+        new THREE.MeshBasicMaterial({ color: 0xffe7a0, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
+      );
+      pad.rotation.x = -Math.PI / 2;
+      pad.position.set(JAR_HOME.x, 0.06, JAR_HOME.z);
+      scene.add(pad);
     }
 
     // City Gate (win)
@@ -263,14 +290,13 @@
 
     // Input
     keys = {};
-    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('keyup', onKeyUp);
     renderer.domElement.addEventListener('click', () => {
-      renderer.domElement.requestPointerLock();
+      if (!renderer || !renderer.domElement) return;
+      try { renderer.domElement.requestPointerLock(); } catch (e) {}
     });
-    document.addEventListener('pointerlockchange', () => {
-      pointerLocked = document.pointerLockElement === renderer.domElement;
-    });
+    document.addEventListener('pointerlockchange', onPointerLock);
     document.addEventListener('mousemove', onMouseMove);
 
     // Resize
@@ -278,20 +304,27 @@
 
     // Start loop
     animationId = requestAnimationFrame(animate);
-    statusEl.innerHTML = 'Click the view to look around • <b>WASD</b> move • <b>E</b> pick up the jar by the gate • Hide behind stalls • Reach the <span style="color:#2ecc71">green gate</span>';
+    statusEl.innerHTML = 'Click the view to look around • <b>WASD</b> move • <b>E</b> pick up the jar on the left wall • Hide behind stalls • Reach the <span style="color:#2ecc71">green gate</span>';
   }
 
+  function isGrabKey(e) {
+    return e.code === 'KeyE' || e.key === 'e' || e.key === 'E';
+  }
   function onKeyDown(e) {
     keys[e.code] = true;
-    if (e.code === 'KeyE' && !e.repeat) grabQueued = true;
-    if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyE'].includes(e.code)) {
+    if (isGrabKey(e) && !e.repeat) commitGrab();
+    if (isGrabKey(e) || ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) {
       e.preventDefault();
     }
   }
   function onKeyUp(e) { keys[e.code] = false; }
 
+  function onPointerLock() {
+    pointerLocked = !!(renderer && renderer.domElement && document.pointerLockElement === renderer.domElement);
+  }
+
   function onMouseMove(e) {
-    if (!pointerLocked) return;
+    if (!pointerLocked || !renderer) return;
     yaw -= e.movementX * 0.0022;
     pitch -= e.movementY * 0.0018;
     pitch = Math.max(-0.4, Math.min(0.65, pitch));
@@ -310,6 +343,7 @@
     animationId = requestAnimationFrame(animate);
     if (!renderer || !scene || !camera) return;
     const dt = Math.min(clock.getDelta(), 0.05);
+    if (catchCooldown > 0) catchCooldown -= dt;
 
     if (!gameWon) {
       updatePlayer(dt);
@@ -333,17 +367,12 @@
     if (keys['KeyA'] || keys['ArrowLeft']) direction.sub(right);
     if (keys['KeyD'] || keys['ArrowRight']) direction.add(right);
 
+    updateCarry(dt);
     const moving = direction.lengthSq() > 0;
     if (moving) {
       direction.normalize();
-      player.position.x += direction.x * SPEED * dt;
-      player.position.z += direction.z * SPEED * dt;
-
-      // Clamp inside alley
-      player.position.x = Math.max(1, Math.min(WORLD_LEN - 2, player.position.x));
-      player.position.z = Math.max(-4.5, Math.min(4.5, player.position.z));
-      const reachingJar = carryState && (carryState.phase === 'reaching' || (grabQueued && jarInRange()));
-      if (!reachingJar) window.PaulCharacters.faceDirection(playerMesh, direction.x, direction.z);
+      parkPlayer(player.position.x + direction.x * SPEED * dt, player.position.z + direction.z * SPEED * dt);
+      window.PaulCharacters.faceDirection(playerMesh, direction.x, direction.z);
 
       animTime += dt;
       if (animTime > 0.32) {
@@ -353,62 +382,52 @@
     }
 
     // Keep feet on ground
-    player.position.y = playerMesh.userData.centerY;
-    updateCarry(dt);
+    parkPlayer(player.position.x, player.position.z);
     window.PaulCharacters.updateWalk(playerMesh, dt, moving, SPEED);
   }
 
+  function parkPlayer(x, z) {
+    if (!player) return;
+    if (!isFinite(x)) x = 2;
+    if (!isFinite(z)) z = 0;
+    player.position.x = Math.max(1, Math.min(WORLD_LEN - 2, x));
+    player.position.z = Math.max(-4.5, Math.min(4.5, z));
+    const cy = playerMesh && playerMesh.userData ? playerMesh.userData.centerY : 1.55;
+    player.position.y = isFinite(cy) ? cy : 1.55;
+  }
+
+  const _jarPos = new THREE.Vector3();
+
   function jarInRange() {
-    if (!carryState || !carryState.prop || !scene) return false;
-    if (carryState.phase === 'holding' || carryState.phase === 'placing') return false;
+    if (!carryState || !carryState.prop || !scene || !player) return false;
+    if (carryState.phase === 'holding' || carryState.phase === 'placing' || carryState.phase === 'reaching') return false;
     if (carryState.prop.parent !== scene) return false;
-    const p = carryState.prop.position;
-    const dx = player.position.x - p.x;
-    const dz = player.position.z - p.z;
-    return Math.hypot(dx, dz) < 1.75;
+    carryState.prop.getWorldPosition(_jarPos);
+    const dx = player.position.x - _jarPos.x;
+    const dz = player.position.z - _jarPos.z;
+    return Math.hypot(dx, dz) < JAR_REACH;
   }
 
-  function placePoint() {
-    const yawC = playerMesh.rotation.y;
-    let x = player.position.x + Math.sin(yawC) * 1.3;
-    let z = player.position.z + Math.cos(yawC) * 1.3;
-    x = Math.max(1.2, Math.min(WORLD_LEN - 4, x));
-    z = Math.max(-4.0, Math.min(4.0, z));
-    return { x: x, y: 0, z: z };
-  }
-
-  function updateCarry(dt) {
-    if (!carryState || !window.PaulCharacters.stepCarry || gameWon) return;
+  function carryContext(pressed) {
     const inRange = jarInRange();
-    if (carryState.phase === 'reaching' || (grabQueued && inRange)) {
-      const p = carryState.prop.position;
-      if (carryState.prop.parent === scene) {
-        window.PaulCharacters.faceDirection(playerMesh, p.x - player.position.x, p.z - player.position.z);
-        const dx = p.x - player.position.x;
-        const dz = p.z - player.position.z;
-        const dist = Math.hypot(dx, dz) || 1;
-        const want = 0.98;
-        if (dist > want) {
-          const step = Math.min(dist - want, 7 * dt);
-          player.position.x += (dx / dist) * step;
-          player.position.z += (dz / dist) * step;
-          player.position.x = Math.max(1, Math.min(WORLD_LEN - 2, player.position.x));
-          player.position.z = Math.max(-4.5, Math.min(4.5, player.position.z));
-        }
-      }
-    }
-    const pressed = grabQueued;
-    grabQueued = false;
-    const result = window.PaulCharacters.stepCarry(carryState, dt, {
-      pressed: pressed,
+    if (inRange) nearJarUntil = performance.now() + 1000;
+    const near = inRange || performance.now() < nearJarUntil;
+    return {
+      pressed: !!pressed,
+      latched: !!pressed && near,
       inRange: inRange,
       playerMesh: playerMesh,
       scene: scene,
       placeAt: placePoint()
-    });
+    };
+  }
+
+  function applyCarryResult(result) {
+    if (!result || !carryState) return;
     if (result.event === 'grabbed' && window.PaulSFX) window.PaulSFX.goal();
     if (result.event === 'placed' && window.PaulSFX) window.PaulSFX.click();
     const prop = carryState.prop;
+    const inRange = jarInRange();
     if (prop && prop.userData.bodyMat && prop.parent === scene) {
       prop.userData.bodyMat.emissiveIntensity = inRange ? 0.45 : 0.16;
     }
@@ -423,19 +442,67 @@
     }
   }
 
+  function commitGrab() {
+    if (!carryState || !window.PaulCharacters.stepCarry || gameWon || !playerMesh) return;
+    const phase = carryState.phase;
+    const holding = phase === 'holding' || phase === 'placing' || phase === 'reaching';
+    if (holding && performance.now() - holdStartedAt < 650) return;
+    const result = window.PaulCharacters.stepCarry(carryState, 0, carryContext(true));
+    if (result && result.event === 'grabbed') holdStartedAt = performance.now();
+    applyCarryResult(result);
+    if (playerMesh) window.PaulCharacters.updateWalk(playerMesh, 0, false, 0);
+  }
+
+  function placePoint() {
+    const yawC = playerMesh ? playerMesh.rotation.y : (Math.PI / 2);
+    const gx = gateMesh ? gateMesh.position.x : 68;
+    const gz = gateMesh ? gateMesh.position.z : 0;
+    let x = player.position.x + Math.cos(yawC) * 0.95;
+    let z = player.position.z - Math.sin(yawC) * 0.95;
+    x = Math.max(1.2, Math.min(WORLD_LEN - 4, x));
+    z = Math.max(-3.6, Math.min(3.6, z));
+    if (Math.hypot(x - gx, z - gz) < 4.1) {
+      const side = z >= gz ? 1 : -1;
+      z = Math.max(-3.6, Math.min(3.6, gz + side * 4.25));
+      if (Math.hypot(x - gx, z - gz) < 3.8) x = Math.max(1.2, gx - 4.3);
+    }
+    return { x: x, y: 0, z: z };
+  }
+
+  function updateCarry(dt) {
+    if (!carryState || !window.PaulCharacters.stepCarry || gameWon || !playerMesh) return;
+    applyCarryResult(window.PaulCharacters.stepCarry(carryState, dt, carryContext(false)));
+  }
+
   function updateCamera() {
-    const body = player.position.y || 1.2;
-    const dist = 6.5 + Math.max(0, body - 1.2) * 2.4;
-    const height = 2.5 + body * 0.5;
+    if (!camera || !player || !playerMesh) return;
+    if (!isFinite(player.position.x) || !isFinite(player.position.z)) return;
+    const body = isFinite(player.position.y) ? player.position.y : 1.2;
+    const dist = 1.55 + Math.max(0, body - 1.2) * 0.25;
+    const height = 1.22 + body * 0.05;
+    const shoulder = 2.85;
     const offset = new THREE.Vector3(
-      -Math.sin(yaw) * dist,
-      height + Math.sin(pitch) * 2,
-      -Math.cos(yaw) * dist
+      -Math.sin(yaw) * dist + Math.cos(yaw) * shoulder,
+      height + Math.sin(pitch) * 1.2,
+      -Math.cos(yaw) * dist - Math.sin(yaw) * shoulder
     );
-    const target = new THREE.Vector3().copy(player.position).add(new THREE.Vector3(0, 0.45, 0));
     const desired = new THREE.Vector3().copy(player.position).add(offset);
-    camera.position.lerp(desired, 0.12);
-    camera.lookAt(target);
+    desired.z = Math.max(-4.7, Math.min(4.7, desired.z));
+    camera.position.lerp(desired, 0.14);
+    camera.lookAt(player.position.x, player.position.y + 0.82, player.position.z);
+    if (playerFill) {
+      playerFill.position.set(
+        player.position.x - Math.sin(yaw) * 1.2,
+        player.position.y + 1.6,
+        player.position.z - Math.sin(yaw) * 0.8
+      );
+    }
+    if (window.PaulCharacters.presentHead) {
+      window.PaulCharacters.presentHead(playerMesh, camera);
+      guards.forEach(function (g) {
+        if (g.mesh) window.PaulCharacters.presentHead(g.mesh, camera);
+      });
+    }
   }
 
   function updateGuards(dt) {
@@ -474,34 +541,38 @@
   }
 
   function checkCatch() {
-    if (isHidden || gameWon) return;
-    const px = player.position.x;
-    const pz = player.position.z;
-    guards.forEach(g => {
-      const dx = px - g.mesh.position.x;
-      const dz = pz - g.mesh.position.z;
-      const dist = Math.sqrt(dx*dx + dz*dz);
-      if (dist < 2.0) {
-        // Caught
-        lives--;
-        if (livesEl) livesEl.textContent = '❤️ ' + lives;
-        if (statusEl) {
-          statusEl.innerHTML = '<span style="color:#ff6b6b">Caught by Saul’s men! −1 life — hide next time!</span>';
-        }
-        // Knockback
-        player.position.x -= 3;
-        if (onLifeLost) onLifeLost(lives);
-        if (lives <= 0) {
-          if (statusEl) statusEl.innerHTML = 'No lives left…';
-          setTimeout(() => {
-            destroy3D();
-            if (onGameOver) onGameOver();
-          }, 1200);
-        }
-        // Brief invuln by moving
-        g.mesh.position.x += g.dir * 4;
+    if (isHidden || gameWon || catchCooldown > 0 || !player) return;
+    for (let i = 0; i < guards.length; i++) {
+      const g = guards[i];
+      if (!g.mesh) continue;
+      const dx = player.position.x - g.mesh.position.x;
+      const dz = player.position.z - g.mesh.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist >= 2.0) continue;
+      catchCooldown = 1.4;
+      lives--;
+      if (livesEl) livesEl.textContent = '❤️ ' + lives;
+      if (statusEl) {
+        statusEl.innerHTML = '<span style="color:#ff6b6b">Caught by Saul’s men! −1 life — hide next time!</span>';
       }
-    });
+      const len = Math.max(dist, 0.001);
+      parkPlayer(player.position.x + (dx / len) * 3.4, player.position.z + (dz / len) * 3.4);
+      if (Math.hypot(player.position.x - g.mesh.position.x, player.position.z - g.mesh.position.z) < 2.45) {
+        parkPlayer(Math.max(1, g.mesh.position.x - 3.3), player.position.z);
+      }
+      g.mesh.position.x += g.dir * 4;
+      if (onLifeLost) onLifeLost(lives);
+      if (lives <= 0) {
+        gameWon = true;
+        if (statusEl) statusEl.innerHTML = 'No lives left…';
+        if (document.pointerLockElement) document.exitPointerLock();
+        setTimeout(() => {
+          destroy3D();
+          if (onGameOver) onGameOver();
+        }, 1200);
+      }
+      break;
+    }
   }
 
   function checkWin() {
@@ -525,9 +596,10 @@
       cancelAnimationFrame(animationId);
       animationId = null;
     }
-    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('keydown', onKeyDown, true);
     window.removeEventListener('keyup', onKeyUp);
     document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('pointerlockchange', onPointerLock);
     window.removeEventListener('resize', onResize);
     if (document.pointerLockElement) document.exitPointerLock();
     if (renderer) {
@@ -545,7 +617,10 @@
     carryState = null;
     carryHintEl = null;
     carryBtn = null;
-    grabQueued = false;
+    nearJarUntil = 0;
+    holdStartedAt = 0;
+    playerFill = null;
+    catchCooldown = 0;
     const ui = document.getElementById('td-ui');
     if (ui) ui.remove();
   }
