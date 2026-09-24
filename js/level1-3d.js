@@ -20,7 +20,9 @@
   let pointerLocked = false;
   let carryState = null, carryLabel = null, carryHintEl = null, carryBtn = null;
   let grabQueued = false;
-  const JAR_HOME = { x: 62.2, z: 2.35 };
+  let catchCooldown = 0;
+  let playerFill = null;
+  const JAR_HOME = { x: 60.6, z: 3.25 };
 
   const SPEED = 8.5;
   const WORLD_LEN = 80;
@@ -34,6 +36,11 @@
     lives = startLives || 3;
     gameWon = false;
     isHidden = false;
+    catchCooldown = 0;
+    playerFill = null;
+    yaw = Math.PI / 2;
+    pitch = 0.05;
+    pointerLocked = false;
     onComplete = completeCb;
     onLifeLost = lifeCb;
     onGameOver = gameOverCb;
@@ -95,6 +102,9 @@
 
     // Lights
     const ambient = new THREE.AmbientLight(0x667088, 0.72);
+    playerFill = new THREE.PointLight(0xfff1d6, 0.85, 8);
+    playerFill.position.set(2, 3, 0);
+    scene.add(playerFill);
     scene.add(ambient);
 
     // Moon / sky light
@@ -266,11 +276,10 @@
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     renderer.domElement.addEventListener('click', () => {
-      renderer.domElement.requestPointerLock();
+      if (!renderer || !renderer.domElement) return;
+      try { renderer.domElement.requestPointerLock(); } catch (e) {}
     });
-    document.addEventListener('pointerlockchange', () => {
-      pointerLocked = document.pointerLockElement === renderer.domElement;
-    });
+    document.addEventListener('pointerlockchange', onPointerLock);
     document.addEventListener('mousemove', onMouseMove);
 
     // Resize
@@ -290,8 +299,12 @@
   }
   function onKeyUp(e) { keys[e.code] = false; }
 
+  function onPointerLock() {
+    pointerLocked = !!(renderer && renderer.domElement && document.pointerLockElement === renderer.domElement);
+  }
+
   function onMouseMove(e) {
-    if (!pointerLocked) return;
+    if (!pointerLocked || !renderer) return;
     yaw -= e.movementX * 0.0022;
     pitch -= e.movementY * 0.0018;
     pitch = Math.max(-0.4, Math.min(0.65, pitch));
@@ -310,6 +323,7 @@
     animationId = requestAnimationFrame(animate);
     if (!renderer || !scene || !camera) return;
     const dt = Math.min(clock.getDelta(), 0.05);
+    if (catchCooldown > 0) catchCooldown -= dt;
 
     if (!gameWon) {
       updatePlayer(dt);
@@ -336,12 +350,7 @@
     const moving = direction.lengthSq() > 0;
     if (moving) {
       direction.normalize();
-      player.position.x += direction.x * SPEED * dt;
-      player.position.z += direction.z * SPEED * dt;
-
-      // Clamp inside alley
-      player.position.x = Math.max(1, Math.min(WORLD_LEN - 2, player.position.x));
-      player.position.z = Math.max(-4.5, Math.min(4.5, player.position.z));
+      parkPlayer(player.position.x + direction.x * SPEED * dt, player.position.z + direction.z * SPEED * dt);
       const reachingJar = carryState && (carryState.phase === 'reaching' || (grabQueued && jarInRange()));
       if (!reachingJar) window.PaulCharacters.faceDirection(playerMesh, direction.x, direction.z);
 
@@ -353,9 +362,19 @@
     }
 
     // Keep feet on ground
-    player.position.y = playerMesh.userData.centerY;
+    parkPlayer(player.position.x, player.position.z);
     updateCarry(dt);
     window.PaulCharacters.updateWalk(playerMesh, dt, moving, SPEED);
+  }
+
+  function parkPlayer(x, z) {
+    if (!player) return;
+    if (!isFinite(x)) x = 2;
+    if (!isFinite(z)) z = 0;
+    player.position.x = Math.max(1, Math.min(WORLD_LEN - 2, x));
+    player.position.z = Math.max(-4.5, Math.min(4.5, z));
+    const cy = playerMesh && playerMesh.userData ? playerMesh.userData.centerY : 1.55;
+    player.position.y = isFinite(cy) ? cy : 1.55;
   }
 
   function jarInRange() {
@@ -390,10 +409,11 @@
         const want = 0.98;
         if (dist > want) {
           const step = Math.min(dist - want, 7 * dt);
-          player.position.x += (dx / dist) * step;
-          player.position.z += (dz / dist) * step;
-          player.position.x = Math.max(1, Math.min(WORLD_LEN - 2, player.position.x));
-          player.position.z = Math.max(-4.5, Math.min(4.5, player.position.z));
+          const nx = player.position.x + (dx / dist) * step;
+          const nz = player.position.z + (dz / dist) * step;
+          const gx = gateMesh ? gateMesh.position.x : 68;
+          const gz = gateMesh ? gateMesh.position.z : 0;
+          if (Math.hypot(nx - gx, nz - gz) >= 3.85) parkPlayer(nx, nz);
         }
       }
     }
@@ -424,18 +444,34 @@
   }
 
   function updateCamera() {
-    const body = player.position.y || 1.2;
-    const dist = 6.5 + Math.max(0, body - 1.2) * 2.4;
-    const height = 2.5 + body * 0.5;
+    if (!camera || !player || !playerMesh) return;
+    if (!isFinite(player.position.x) || !isFinite(player.position.z)) return;
+    const body = isFinite(player.position.y) ? player.position.y : 1.2;
+    const dist = 1.55 + Math.max(0, body - 1.2) * 0.25;
+    const height = 1.22 + body * 0.05;
+    const shoulder = 2.85;
     const offset = new THREE.Vector3(
-      -Math.sin(yaw) * dist,
-      height + Math.sin(pitch) * 2,
-      -Math.cos(yaw) * dist
+      -Math.sin(yaw) * dist + Math.cos(yaw) * shoulder,
+      height + Math.sin(pitch) * 1.2,
+      -Math.cos(yaw) * dist - Math.sin(yaw) * shoulder
     );
-    const target = new THREE.Vector3().copy(player.position).add(new THREE.Vector3(0, 0.45, 0));
     const desired = new THREE.Vector3().copy(player.position).add(offset);
-    camera.position.lerp(desired, 0.12);
-    camera.lookAt(target);
+    desired.z = Math.max(-4.7, Math.min(4.7, desired.z));
+    camera.position.lerp(desired, 0.14);
+    camera.lookAt(player.position.x, player.position.y + 0.82, player.position.z);
+    if (playerFill) {
+      playerFill.position.set(
+        player.position.x - Math.sin(yaw) * 1.2,
+        player.position.y + 1.6,
+        player.position.z - Math.sin(yaw) * 0.8
+      );
+    }
+    if (window.PaulCharacters.presentHead) {
+      window.PaulCharacters.presentHead(playerMesh, camera);
+      guards.forEach(function (g) {
+        if (g.mesh) window.PaulCharacters.presentHead(g.mesh, camera);
+      });
+    }
   }
 
   function updateGuards(dt) {
@@ -474,34 +510,38 @@
   }
 
   function checkCatch() {
-    if (isHidden || gameWon) return;
-    const px = player.position.x;
-    const pz = player.position.z;
-    guards.forEach(g => {
-      const dx = px - g.mesh.position.x;
-      const dz = pz - g.mesh.position.z;
-      const dist = Math.sqrt(dx*dx + dz*dz);
-      if (dist < 2.0) {
-        // Caught
-        lives--;
-        if (livesEl) livesEl.textContent = '❤️ ' + lives;
-        if (statusEl) {
-          statusEl.innerHTML = '<span style="color:#ff6b6b">Caught by Saul’s men! −1 life — hide next time!</span>';
-        }
-        // Knockback
-        player.position.x -= 3;
-        if (onLifeLost) onLifeLost(lives);
-        if (lives <= 0) {
-          if (statusEl) statusEl.innerHTML = 'No lives left…';
-          setTimeout(() => {
-            destroy3D();
-            if (onGameOver) onGameOver();
-          }, 1200);
-        }
-        // Brief invuln by moving
-        g.mesh.position.x += g.dir * 4;
+    if (isHidden || gameWon || catchCooldown > 0 || !player) return;
+    for (let i = 0; i < guards.length; i++) {
+      const g = guards[i];
+      if (!g.mesh) continue;
+      const dx = player.position.x - g.mesh.position.x;
+      const dz = player.position.z - g.mesh.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist >= 2.0) continue;
+      catchCooldown = 1.4;
+      lives--;
+      if (livesEl) livesEl.textContent = '❤️ ' + lives;
+      if (statusEl) {
+        statusEl.innerHTML = '<span style="color:#ff6b6b">Caught by Saul’s men! −1 life — hide next time!</span>';
       }
-    });
+      const len = Math.max(dist, 0.001);
+      parkPlayer(player.position.x + (dx / len) * 3.4, player.position.z + (dz / len) * 3.4);
+      if (Math.hypot(player.position.x - g.mesh.position.x, player.position.z - g.mesh.position.z) < 2.45) {
+        parkPlayer(Math.max(1, g.mesh.position.x - 3.3), player.position.z);
+      }
+      g.mesh.position.x += g.dir * 4;
+      if (onLifeLost) onLifeLost(lives);
+      if (lives <= 0) {
+        gameWon = true;
+        if (statusEl) statusEl.innerHTML = 'No lives left…';
+        if (document.pointerLockElement) document.exitPointerLock();
+        setTimeout(() => {
+          destroy3D();
+          if (onGameOver) onGameOver();
+        }, 1200);
+      }
+      break;
+    }
   }
 
   function checkWin() {
@@ -528,6 +568,7 @@
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
     document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('pointerlockchange', onPointerLock);
     window.removeEventListener('resize', onResize);
     if (document.pointerLockElement) document.exitPointerLock();
     if (renderer) {
@@ -546,6 +587,8 @@
     carryHintEl = null;
     carryBtn = null;
     grabQueued = false;
+    playerFill = null;
+    catchCooldown = 0;
     const ui = document.getElementById('td-ui');
     if (ui) ui.remove();
   }

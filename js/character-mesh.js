@@ -112,37 +112,68 @@
   }
 
   function tunicShape() {
+    // Strong shoulder / waist / hip so the chase camera reads a person, not a column.
     const pts = [
-      [0.075, 0.64],
-      [0.13, 0.54],
-      [0.27, 0.40],
-      [0.31, 0.28],
-      [0.24, 0.10],
-      [0.20, -0.02],
-      [0.25, -0.16],
-      [0.31, -0.32],
-      [0.36, -0.48],
-      [0.31, -0.54]
+      [0.09, 0.66],
+      [0.15, 0.54],
+      [0.32, 0.40],
+      [0.40, 0.26],
+      [0.30, 0.12],
+      [0.18, 0.0],
+      [0.155, -0.10],
+      [0.28, -0.24],
+      [0.36, -0.38],
+      [0.30, -0.50],
+      [0.20, -0.56]
     ];
     return new THREE.LatheGeometry(pts.map(function (p) {
       return new THREE.Vector2(p[0], p[1]);
-    }), 18);
+    }), 28);
+  }
+
+  function finiteAttr(attr, fallback) {
+    for (let i = 0; i < attr.count; i++) {
+      const x = attr.getX(i);
+      const y = attr.getY(i);
+      const z = attr.getZ(i);
+      if (!isFinite(x) || !isFinite(y) || !isFinite(z)) attr.setXYZ(i, fallback[0], fallback[1], fallback[2]);
+    }
+    attr.needsUpdate = true;
   }
 
   function drapeGeometry(width, length, segsX, segsY, bow) {
     const geo = new THREE.PlaneGeometry(width, length, segsX, segsY);
     const pos = geo.attributes.position;
+    const halfW = Math.max(0.001, width * 0.5);
+    const halfL = Math.max(0.001, length * 0.5);
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const y = pos.getY(i);
-      const nx = x / (width * 0.5);
-      const ny = (y / (length * 0.5) + 1) * 0.5;
-      const z = Math.pow(1 - ny, 1.15) * bow + nx * nx * 0.1 * (1 - ny * 0.4);
+      const nx = x / halfW;
+      // Clamp before the fractional power. A top-row sample slightly above 1
+      // makes Math.pow(negative, 1.15) NaN and WebGL drops the mesh.
+      const ny = Math.min(1, Math.max(0, (y / halfL + 1) * 0.5));
+      const fall = Math.max(0, 1 - ny);
+      const z = Math.pow(fall, 1.15) * bow + nx * nx * 0.1 * (1 - ny * 0.4);
       pos.setZ(i, -z);
       // Wider across the shoulders, softer through the hem, so the back is not a rectangle.
-      pos.setX(i, x * (0.78 + 0.34 * ny * ny));
+      pos.setX(i, x * (0.72 + 0.4 * ny * ny));
     }
+    finiteAttr(pos, [0, 0, 0]);
     geo.computeVertexNormals();
+    finiteAttr(geo.attributes.normal, [0, 0, 1]);
+    return geo;
+  }
+
+  function limbLathe(samples, length, segs) {
+    const pts = samples.map(function (r, i) {
+      const t = samples.length === 1 ? 0 : i / (samples.length - 1);
+      return new THREE.Vector2(Math.max(0.02, r), -t * length);
+    });
+    const geo = new THREE.LatheGeometry(pts, segs || 14);
+    finiteAttr(geo.attributes.position, [0, 0, 0]);
+    geo.computeVertexNormals();
+    finiteAttr(geo.attributes.normal, [0, 1, 0]);
     return geo;
   }
 
@@ -168,22 +199,59 @@
   }
 
   function attachFaceCard(head, url) {
-    if (!url) return;
-    const loader = new THREE.TextureLoader();
-    const tex = loader.load(url);
-    tex.encoding = THREE.sRGBEncoding;
-    tex.minFilter = THREE.LinearFilter;
-    tex.magFilter = THREE.LinearFilter;
+    if (!url) return null;
+    // Unlit oval so the portrait stays readable in the Level 1 night scene.
+    // presentHead parks it on the camera-facing side of the skull — the old
+    // card sat at z=0.20, inside the head sphere, so play only showed a blank scalp.
     const mat = new THREE.MeshBasicMaterial({
-      map: tex,
-      transparent: true
+      color: 0xffd8b8,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3
     });
     mat.userData.isFace = true;
-    const card = new THREE.Mesh(curvedFace(0.34, 0.40), mat);
-    card.position.set(0, 0.01, 0.20);
+    const card = new THREE.Mesh(new THREE.CircleGeometry(0.25, 32), mat);
+    card.position.set(0, -0.02, 0.34);
+    card.renderOrder = 5;
     card.castShadow = false;
-    card.receiveShadow = true;
+    card.receiveShadow = false;
     head.add(card);
+    const loader = new THREE.TextureLoader();
+    loader.load(url, function (src) {
+      const img = src.image;
+      if (!img || !img.width || typeof document === 'undefined') {
+        src.encoding = THREE.sRGBEncoding;
+        src.minFilter = THREE.LinearFilter;
+        src.magFilter = THREE.LinearFilter;
+        mat.map = src;
+        mat.color.setHex(0xffffff);
+        mat.needsUpdate = true;
+        return;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      // Full-body portrait: keep the painted head (upper band, centered).
+      const sx = img.width * 0.28;
+      const sy = img.height * 0.035;
+      const sW = img.width * 0.44;
+      const sH = img.height * 0.20;
+      ctx.beginPath();
+      ctx.ellipse(128, 132, 116, 122, 0, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(img, sx, sy, sW, sH, 6, 4, 244, 248);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.encoding = THREE.sRGBEncoding;
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.needsUpdate = true;
+      mat.map = tex;
+      mat.color.setHex(0xffffff);
+      mat.needsUpdate = true;
+    });
+    return card;
   }
 
   function makeHand(material) {
@@ -212,20 +280,19 @@
 
   function armChain(upperLen, foreLen, skin, cloth) {
     const shoulder = new THREE.Group();
-    const upper = part(new THREE.CylinderGeometry(0.072, 0.062, upperLen, 12), skin);
-    upper.position.y = -upperLen / 2;
+    // Lathe with a bicep bulge and a tapered forearm — not a constant cylinder.
+    const upper = part(limbLathe([0.072, 0.102, 0.112, 0.084, 0.062], upperLen, 16), skin);
     shoulder.add(upper);
-    const cap = part(new THREE.SphereGeometry(0.074, 10, 8), skin);
+    const cap = part(new THREE.SphereGeometry(0.078, 12, 10), skin);
     shoulder.add(cap);
-    const sleeve = part(new THREE.CylinderGeometry(0.09, 0.078, 0.2, 12), cloth);
-    sleeve.position.y = -0.07;
+    const sleeve = part(limbLathe([0.118, 0.108, 0.08], 0.18, 14), cloth);
+    sleeve.position.y = -0.01;
     shoulder.add(sleeve);
     const elbow = new THREE.Group();
     elbow.position.y = -upperLen;
-    const joint = part(new THREE.SphereGeometry(0.064, 10, 8), skin);
+    const joint = part(new THREE.SphereGeometry(0.066, 12, 10), skin);
     elbow.add(joint);
-    const fore = part(new THREE.CylinderGeometry(0.058, 0.046, foreLen, 12), skin);
-    fore.position.y = -foreLen / 2;
+    const fore = part(limbLathe([0.064, 0.056, 0.048, 0.04], foreLen, 16), skin);
     elbow.add(fore);
     const hand = makeHand(skin);
     hand.position.y = -foreLen;
@@ -236,22 +303,29 @@
     return shoulder;
   }
 
-  function legChain(thighLen, shinLen, thighMat, shinMat, footMat) {
+  function legChain(thighLen, shinLen, thighMat, shinMat, footMat, greaveMat) {
     const hip = new THREE.Group();
-    const thigh = part(new THREE.CylinderGeometry(0.105, 0.08, thighLen, 12), thighMat);
-    thigh.position.y = -thighLen / 2;
+    const thigh = part(limbLathe([0.118, 0.138, 0.12, 0.09, 0.07], thighLen, 16), thighMat);
     hip.add(thigh);
     const knee = new THREE.Group();
     knee.position.y = -thighLen;
-    const joint = part(new THREE.SphereGeometry(0.075, 10, 8), shinMat);
+    const joint = part(new THREE.SphereGeometry(0.078, 12, 10), shinMat);
     knee.add(joint);
-    const shin = part(new THREE.CylinderGeometry(0.07, 0.05, shinLen, 12), shinMat);
-    shin.position.y = -shinLen / 2;
+    const shin = part(limbLathe([0.068, 0.09, 0.098, 0.06, 0.046], shinLen, 16), shinMat);
     knee.add(shin);
-    const foot = part(new THREE.SphereGeometry(0.062, 10, 8), footMat);
-    foot.scale.set(1.05, 0.5, 1.9);
-    foot.position.set(0, -shinLen - 0.01, 0.045);
+    if (greaveMat) {
+      const greave = part(limbLathe([0.086, 0.1, 0.078, 0.052], shinLen * 0.9, 14), greaveMat);
+      greave.position.y = -0.015;
+      knee.add(greave);
+    }
+    const foot = part(new THREE.SphereGeometry(0.07, 12, 10), footMat);
+    foot.scale.set(0.85, 0.42, 2.15);
+    foot.position.set(0, -shinLen - 0.012, 0.055);
     knee.add(foot);
+    const toe = part(new THREE.SphereGeometry(0.04, 8, 6), footMat);
+    toe.scale.set(1.1, 0.55, 1.3);
+    toe.position.set(0, -shinLen - 0.01, 0.15);
+    knee.add(toe);
     const strap = part(new THREE.TorusGeometry(0.04, 0.008, 5, 10), footMat);
     strap.rotation.x = Math.PI / 2;
     strap.position.set(0, -shinLen + 0.015, 0.02);
@@ -300,7 +374,7 @@
   function createCharacter(role, opts) {
     opts = opts || {};
     const palette = ROLES[role] || ROLES.paul;
-    const scale = opts.scale != null ? opts.scale : (role === 'guard' ? 0.98 : 1);
+    const scale = opts.scale != null ? opts.scale : (role === 'guard' ? 1.05 : 1);
     const pose = opts.pose || 'stand';
     const showFace = opts.face !== false;
 
@@ -330,46 +404,72 @@
     group.userData.rig = rig;
 
     const torso = part(tunicShape(), cloth);
-    torso.scale.set(1.06, 1, 0.84);
+    torso.scale.set(role === 'guard' ? 0.72 : 1.0, 1, role === 'guard' ? 0.62 : 0.74);
     rig.add(torso);
 
-    const belt = part(new THREE.TorusGeometry(0.27, 0.028, 8, 18), sashMat);
+    const belt = part(new THREE.TorusGeometry(role === 'guard' ? 0.26 : 0.2, 0.034, 8, 22), sashMat);
     belt.rotation.x = Math.PI / 2;
     belt.position.y = -0.04;
-    belt.scale.set(1.12, 1, 0.9);
+    belt.scale.set(1.08, 1, 0.82);
     rig.add(belt);
 
     if (role === 'paul' || role === 'disciple') {
       const cloakMat = accent.clone();
       cloakMat.side = THREE.DoubleSide;
-      const cloak = part(
-        drapeGeometry(role === 'disciple' ? 0.62 : 0.7, role === 'disciple' ? 0.92 : 1.02, 10, 14, 0.26),
-        cloakMat
-      );
-      cloak.position.set(0, role === 'disciple' ? 0.08 : 0.02, -0.2);
-      rig.add(cloak);
+      // Short shoulder mantle plus two hanging panels, so the waist pinch
+      // stays visible from the chase camera instead of one back slab.
+      const mantle = part(drapeGeometry(0.78, 0.32, 8, 5, 0.14), cloakMat);
+      mantle.position.set(0, 0.40, -0.16);
+      rig.add(mantle);
+      [-1, 1].forEach(function (side) {
+        const panel = part(drapeGeometry(0.30, 0.98, 5, 12, 0.16), cloakMat);
+        panel.position.set(side * 0.2, 0.02, -0.2);
+        panel.rotation.y = side * 0.35;
+        panel.rotation.z = side * -0.12;
+        rig.add(panel);
+      });
       if (role === 'disciple') {
-        const cowl = part(new THREE.TorusGeometry(0.2, 0.055, 8, 14), accent);
+        const cowl = part(new THREE.TorusGeometry(0.2, 0.05, 8, 16), accent);
         cowl.rotation.x = Math.PI / 2;
-        cowl.position.y = 0.5;
-        cowl.scale.set(1.15, 1, 0.72);
+        cowl.position.y = 0.52;
+        cowl.scale.set(1.2, 1, 0.7);
         rig.add(cowl);
         const pouch = part(new THREE.SphereGeometry(0.07, 8, 6), accent);
         pouch.scale.set(0.85, 1.15, 0.55);
-        pouch.position.set(0.22, -0.16, 0.16);
+        pouch.position.set(0.24, -0.18, 0.18);
         rig.add(pouch);
       }
     }
     if (role === 'guard' && armorMat) {
-      const breast = part(new THREE.SphereGeometry(0.26, 16, 12), armorMat);
-      breast.scale.set(1.2, 1.35, 0.48);
-      breast.position.set(0, 0.2, 0.1);
+      const breast = part(new THREE.SphereGeometry(0.28, 18, 14), armorMat);
+      breast.scale.set(1.15, 1.25, 0.62);
+      breast.position.set(0, 0.22, 0.16);
       rig.add(breast);
-      const fauld = part(new THREE.TorusGeometry(0.24, 0.04, 6, 14), armorMat);
+      const backplate = part(new THREE.SphereGeometry(0.26, 18, 14), armorMat);
+      backplate.scale.set(1.05, 1.15, 0.58);
+      backplate.position.set(0, 0.18, -0.18);
+      rig.add(backplate);
+      [0.34, 0.16, -0.02].forEach(function (y) {
+        const band = part(new THREE.TorusGeometry(0.3, 0.028, 6, 18), armorMat);
+        band.rotation.x = Math.PI / 2;
+        band.position.y = y;
+        band.scale.set(1.05, 1, 0.78);
+        rig.add(band);
+      });
+      const fauld = part(new THREE.TorusGeometry(0.28, 0.045, 8, 16), armorMat);
       fauld.rotation.x = Math.PI / 2;
-      fauld.position.y = -0.08;
-      fauld.scale.set(1.15, 1, 0.85);
+      fauld.position.y = -0.12;
+      fauld.scale.set(1.12, 1, 0.88);
       rig.add(fauld);
+      const leather = stdMat(palette.sash, { roughness: 0.7, metalness: 0.08 });
+      for (let i = 0; i < 8; i++) {
+        const ang = -Math.PI * 0.72 + i * (Math.PI * 1.44 / 7);
+        const strip = part(new THREE.CylinderGeometry(0.038, 0.026, 0.32, 7), leather);
+        strip.position.set(Math.sin(ang) * 0.3, -0.32, Math.cos(ang) * 0.2);
+        strip.rotation.z = -Math.sin(ang) * 0.35;
+        strip.rotation.x = Math.cos(ang) * 0.25;
+        rig.add(strip);
+      }
     }
 
     const neck = part(new THREE.CylinderGeometry(0.07, 0.09, 0.12, 10), skin);
@@ -378,31 +478,31 @@
 
     const headPivot = new THREE.Group();
     headPivot.position.y = 0.76;
-    const head = part(new THREE.SphereGeometry(0.27, 20, 16), skin);
-    head.scale.set(1, 1.06, 0.96);
+    const head = part(new THREE.SphereGeometry(0.27, 22, 16), skin);
+    head.scale.set(1, 1.08, 0.94);
     headPivot.add(head);
     const hairCap = part(new THREE.SphereGeometry(0.28, 16, 12), hair);
-    hairCap.scale.set(1.05, 0.58, 1.08);
-    hairCap.position.y = 0.11;
+    hairCap.scale.set(1.02, 0.4, 1.0);
+    hairCap.position.y = 0.2;
     headPivot.add(hairCap);
 
     if (role === 'disciple') {
-      [[-0.16, 0.1, 0.12], [0.16, 0.1, 0.12], [0.0, 0.2, 0.02], [-0.1, 0.16, -0.1], [0.11, 0.15, -0.1], [-0.18, 0.02, 0.02], [0.18, 0.02, 0.02]].forEach(function (p) {
-        const curl = part(new THREE.SphereGeometry(0.075, 8, 6), hair);
+      [[-0.18, 0.14, 0.06], [0.18, 0.14, 0.06], [0.0, 0.22, 0.0], [-0.12, 0.18, -0.06], [0.12, 0.18, -0.06], [-0.2, 0.06, -0.02], [0.2, 0.06, -0.02]].forEach(function (p) {
+        const curl = part(new THREE.SphereGeometry(0.07, 8, 6), hair);
         curl.position.set(p[0], p[1], p[2]);
         headPivot.add(curl);
       });
-      const beard = part(new THREE.SphereGeometry(0.09, 10, 8), hair);
-      beard.scale.set(1.2, 0.7, 0.5);
-      beard.position.set(0, -0.16, 0.12);
+      const beard = part(new THREE.SphereGeometry(0.08, 10, 8), hair);
+      beard.scale.set(1.15, 0.65, 0.45);
+      beard.position.set(0, -0.18, 0.1);
       headPivot.add(beard);
     }
 
     if (role === 'guard' && palette.helmet) {
       const helmMat = stdMat(palette.helmet, { metalness: 0.58, roughness: 0.32, emissiveIntensity: 0.05 });
       const helm = part(new THREE.SphereGeometry(0.3, 16, 12), helmMat);
-      helm.scale.set(1.05, 0.78, 1.08);
-      helm.position.y = 0.06;
+      helm.scale.set(1.02, 0.62, 1.02);
+      helm.position.y = 0.14;
       headPivot.add(helm);
       const brim = part(new THREE.TorusGeometry(0.28, 0.028, 6, 16), helmMat);
       brim.rotation.x = Math.PI / 2;
@@ -416,17 +516,17 @@
       headPivot.add(crest);
     }
 
-    if (showFace) attachFaceCard(headPivot, palette.face);
+    if (showFace) group.userData.faceCard = attachFaceCard(headPivot, palette.face);
     rig.add(headPivot);
 
     const shoulderMat = armorMat || cloth;
-    const capL = part(new THREE.SphereGeometry(role === 'guard' ? 0.14 : 0.11, 12, 10), shoulderMat);
-    capL.position.set(-0.36, 0.46, 0);
-    capL.scale.set(1, 0.85, 0.9);
+    const capL = part(new THREE.SphereGeometry(role === 'guard' ? 0.17 : 0.125, 14, 12), shoulderMat);
+    capL.position.set(-0.4, 0.48, 0);
+    capL.scale.set(1.15, 0.8, 0.95);
     rig.add(capL);
-    const capR = part(new THREE.SphereGeometry(role === 'guard' ? 0.14 : 0.11, 12, 10), shoulderMat);
-    capR.position.set(0.36, 0.46, 0);
-    capR.scale.set(1, 0.85, 0.9);
+    const capR = part(new THREE.SphereGeometry(role === 'guard' ? 0.17 : 0.125, 14, 12), shoulderMat);
+    capR.position.set(0.4, 0.48, 0);
+    capR.scale.set(1.15, 0.8, 0.95);
     rig.add(capR);
 
     const upperLen = 0.40;
@@ -456,10 +556,11 @@
 
     const thighLen = 0.46;
     const shinLen = 0.42;
-    const leftLeg = legChain(thighLen, shinLen, cloth, skin, accent);
-    leftLeg.position.set(-0.16, -0.42, 0);
-    const rightLeg = legChain(thighLen, shinLen, cloth, skin, accent);
-    rightLeg.position.set(0.16, -0.42, 0);
+    const greaveMat = role === 'guard' ? armorMat : null;
+    const leftLeg = legChain(thighLen, shinLen, cloth, skin, accent, greaveMat);
+    leftLeg.position.set(-0.18, -0.42, 0);
+    const rightLeg = legChain(thighLen, shinLen, cloth, skin, accent, greaveMat);
+    rightLeg.position.set(0.18, -0.42, 0);
     rig.add(leftLeg);
     rig.add(rightLeg);
 
@@ -787,11 +888,41 @@
     return { hint: hint, event: event, phase: state.phase };
   }
 
+  const _headPos = new THREE.Vector3();
+  const _toCam = new THREE.Vector3();
+  const _inv = new THREE.Matrix4();
+
+  function presentHead(root, camera) {
+    if (!root || !camera || !root.userData) return;
+    const card = root.userData.faceCard;
+    const head = root.userData.head;
+    if (!card || !head || !head.parent) return;
+    // Keep the portrait on the face, and yaw the head toward the chase camera
+    // so Level 1's over-the-shoulder view actually shows young_disciple.jpg.
+    head.parent.updateWorldMatrix(true, false);
+    head.getWorldPosition(_headPos);
+    _toCam.subVectors(camera.position, _headPos);
+    _toCam.y = 0;
+    if (_toCam.lengthSq() < 1e-8) return;
+    _toCam.normalize();
+    _inv.copy(head.parent.matrixWorld).invert();
+    _toCam.transformDirection(_inv);
+    let yaw = Math.atan2(_toCam.x, _toCam.z);
+    const max = 1.2;
+    if (yaw > Math.PI) yaw -= Math.PI * 2;
+    if (yaw < -Math.PI) yaw += Math.PI * 2;
+    yaw = Math.max(-max, Math.min(max, yaw));
+    head.rotation.y += (yaw - head.rotation.y) * 0.4;
+    card.position.set(0, -0.03, 0.34);
+    card.rotation.set(0, 0, 0);
+  }
+
   window.PaulCharacters = {
     create: createCharacter,
     setOpacity: setOpacity,
     updateWalk: updateWalk,
     faceDirection: faceDirection,
+    presentHead: presentHead,
     setCarry: setCarry,
     createWaterJar: createWaterJar,
     createCarryState: createCarryState,

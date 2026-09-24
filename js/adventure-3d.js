@@ -14,7 +14,9 @@
   let SPEED = 8.5;
   let carryState = null, carryLabel = null, carryHintEl = null, carryBtn = null;
   let grabQueued = false;
-  const JAR_HOME = { x: 62.2, z: 2.35 };
+  let catchCooldown = 0;
+  let playerFill = null;
+  const JAR_HOME = { x: 60.6, z: 3.25 };
 
   const LEVELS = {
     1: {
@@ -132,6 +134,11 @@
     gameWon = false;
     frozen = false;
     isHidden = false;
+    catchCooldown = 0;
+    playerFill = null;
+    yaw = Math.PI / 2;
+    pitch = levelNum === 1 ? 0.05 : 0.18;
+    pointerLocked = false;
     onComplete = cbs && cbs.onComplete;
     onLifeLost = cbs && cbs.onLifeLost;
     onGameOver = cbs && cbs.onGameOver;
@@ -238,15 +245,14 @@
     const isTouch = (window.PaulMobile && window.PaulMobile.isTouch && window.PaulMobile.isTouch()) ||
       ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
     renderer.domElement.addEventListener('click', () => {
+      if (!renderer || !renderer.domElement) return;
       if (window.PaulAudio) window.PaulAudio.unlock();
       if (window.PaulSFX) { try { window.PaulSFX.levelStart(); } catch (e) {} }
       if (!isTouch && renderer.domElement.requestPointerLock) {
         try { renderer.domElement.requestPointerLock(); } catch (e) {}
       }
     });
-    document.addEventListener('pointerlockchange', () => {
-      pointerLocked = document.pointerLockElement === renderer.domElement;
-    });
+    document.addEventListener('pointerlockchange', onPointerLock);
     document.addEventListener('mousemove', onMouse);
 
     let dragLook = false, lastDX = 0, lastDY = 0;
@@ -285,6 +291,9 @@
   function setupLights(cfg) {
     if (cfg.theme === 'night') {
       scene.add(new THREE.AmbientLight(0x667088, 0.72));
+      playerFill = new THREE.PointLight(0xfff1d6, 0.85, 8);
+      playerFill.position.set(cfg.start.x, 3, cfg.start.z);
+      scene.add(playerFill);
       const moon = new THREE.DirectionalLight(0xc4d0e8, 0.85);
       moon.position.set(-8, 28, 12);
       moon.castShadow = true;
@@ -623,8 +632,11 @@
     if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyE'].includes(e.code)) e.preventDefault();
   }
   function onKeyUp(e) { keys[e.code] = false; }
+  function onPointerLock() {
+    pointerLocked = !!(renderer && renderer.domElement && document.pointerLockElement === renderer.domElement);
+  }
   function onMouse(e) {
-    if (!pointerLocked || frozen) return;
+    if (!pointerLocked || frozen || !renderer) return;
     yaw -= e.movementX * 0.002;
     pitch -= e.movementY * 0.0016;
     pitch = Math.max(-0.35, Math.min(0.55, pitch));
@@ -639,8 +651,9 @@
 
   function loop() {
     animId = requestAnimationFrame(loop);
-    if (!renderer) return;
+    if (!renderer || !scene || !camera) return;
     const dt = Math.min(clock.getDelta(), 0.05);
+    if (catchCooldown > 0) catchCooldown -= dt;
     if (!frozen && !gameWon) {
       updatePlayer(dt);
       updateGuards(dt);
@@ -682,11 +695,7 @@
     const moving = dir.lengthSq() > 0;
     if (moving) {
       dir.normalize();
-      playerPos.x += dir.x * SPEED * dt;
-      playerPos.z += dir.z * SPEED * dt;
-      playerPos.x = Math.max(1, Math.min(72, playerPos.x));
-      playerPos.z = Math.max(-4.2, Math.min(4.2, playerPos.z));
-      playerMesh.position.copy(playerPos);
+      parkPlayer(playerPos.x + dir.x * SPEED * dt, playerPos.z + dir.z * SPEED * dt);
       const reachingJar = carryState && (carryState.phase === 'reaching' || (grabQueued && jarInRange()));
       if (!reachingJar) window.PaulCharacters.faceDirection(playerMesh, dir.x, dir.z);
 
@@ -698,6 +707,17 @@
     }
     updateCarry(dt, moving);
     window.PaulCharacters.updateWalk(playerMesh, dt, moving, SPEED);
+  }
+
+  function parkPlayer(x, z) {
+    const cfg = LEVELS[currentLevel] || LEVELS[1];
+    if (!isFinite(x)) x = cfg.start.x;
+    if (!isFinite(z)) z = cfg.start.z;
+    playerPos.x = Math.max(1, Math.min(72, x));
+    playerPos.z = Math.max(-4.2, Math.min(4.2, z));
+    const cy = playerMesh && playerMesh.userData ? playerMesh.userData.centerY : 1.55;
+    playerPos.y = isFinite(cy) ? cy : 1.55;
+    if (playerMesh) playerMesh.position.copy(playerPos);
   }
 
   function jarInRange() {
@@ -732,11 +752,10 @@
         const want = 0.98;
         if (dist > want) {
           const step = Math.min(dist - want, 7 * dt);
-          playerPos.x += (dx / dist) * step;
-          playerPos.z += (dz / dist) * step;
-          playerPos.x = Math.max(1, Math.min(72, playerPos.x));
-          playerPos.z = Math.max(-4.2, Math.min(4.2, playerPos.z));
-          playerMesh.position.copy(playerPos);
+          const nx = playerPos.x + (dx / dist) * step;
+          const nz = playerPos.z + (dz / dist) * step;
+          const entersGoal = goalZone && Math.hypot(nx - goalZone.x, nz - goalZone.z) < goalZone.r + 0.35;
+          if (!entersGoal) parkPlayer(nx, nz);
         }
       }
     }
@@ -772,13 +791,36 @@
   }
 
   function updateCamera() {
-    const body = playerPos.y || 1.2;
-    const dist = 6.4 + Math.max(0, body - 1.2) * 2.4;
-    const height = 2.35 + body * 0.55;
-    const offset = new THREE.Vector3(-Math.sin(yaw) * dist, height + Math.sin(pitch) * 1.8, -Math.cos(yaw) * dist);
+    if (!camera || !playerPos || !playerMesh) return;
+    if (!isFinite(playerPos.x) || !isFinite(playerPos.z)) return;
+    const body = isFinite(playerPos.y) ? playerPos.y : 1.2;
+    const close = currentLevel === 1;
+    // Level 1 sits close and off the shoulder so the waist, limbs, and face card read in play.
+    const dist = (close ? 1.55 : 6.4) + Math.max(0, body - 1.2) * 0.25;
+    const height = (close ? 1.22 : 2.35) + body * (close ? 0.05 : 0.38);
+    const shoulder = close ? 2.85 : 0.35;
+    const offset = new THREE.Vector3(
+      -Math.sin(yaw) * dist + Math.cos(yaw) * shoulder,
+      height + Math.sin(pitch) * 1.2,
+      -Math.cos(yaw) * dist - Math.sin(yaw) * shoulder
+    );
     const desired = new THREE.Vector3().copy(playerPos).add(offset);
-    camera.position.lerp(desired, 0.12);
-    camera.lookAt(playerPos.x, playerPos.y + 0.45, playerPos.z);
+    if (close) desired.z = Math.max(-4.7, Math.min(4.7, desired.z));
+    camera.position.lerp(desired, 0.14);
+    camera.lookAt(playerPos.x, playerPos.y + (close ? 0.82 : 0.45), playerPos.z);
+    if (playerFill) {
+      playerFill.position.set(
+        playerPos.x - Math.sin(yaw) * 1.2 + Math.cos(yaw) * 0.8,
+        playerPos.y + 1.6,
+        playerPos.z - Math.cos(yaw) * 1.2 - Math.sin(yaw) * 0.8
+      );
+    }
+    if (window.PaulCharacters.presentHead) {
+      window.PaulCharacters.presentHead(playerMesh, camera);
+      npcs.forEach(function (g) {
+        if (g.mesh) window.PaulCharacters.presentHead(g.mesh, camera);
+      });
+    }
   }
 
   function updateGuards(dt) {
@@ -814,25 +856,33 @@
 
   function checkCatch() {
     const cfg = LEVELS[currentLevel];
-    if (!cfg.guards || isHidden || frozen || gameWon) return;
-    npcs.forEach(g => {
-      if (g.type !== 'guard') return;
+    if (!cfg.guards || isHidden || frozen || gameWon || catchCooldown > 0) return;
+    for (let i = 0; i < npcs.length; i++) {
+      const g = npcs[i];
+      if (g.type !== 'guard' || !g.mesh) continue;
       const dx = playerPos.x - g.mesh.position.x;
       const dz = playerPos.z - g.mesh.position.z;
-      if (Math.sqrt(dx*dx + dz*dz) < 2.0) {
-        lives--;
-        if (livesEl) livesEl.textContent = '❤️ ' + lives;
-        if (statusEl) statusEl.innerHTML = '<span style="color:#ff6b6b">Caught! −1 life</span>';
-        if (window.PaulSFX) window.PaulSFX.catch();
-        playerPos.x -= 3.5;
-        playerMesh.position.copy(playerPos);
-        if (onLifeLost) onLifeLost(lives);
-        if (lives <= 0) {
-          setTimeout(() => { destroyAdventure3D(); if (onGameOver) onGameOver(); }, 1000);
-        }
-        g.mesh.position.x += g.dir * 5;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist >= 2.0) continue;
+      catchCooldown = 1.4;
+      lives--;
+      if (livesEl) livesEl.textContent = '❤️ ' + lives;
+      if (statusEl) statusEl.innerHTML = '<span style="color:#ff6b6b">Caught! −1 life</span>';
+      if (window.PaulSFX) window.PaulSFX.catch();
+      const len = Math.max(dist, 0.001);
+      parkPlayer(playerPos.x + (dx / len) * 3.4, playerPos.z + (dz / len) * 3.4);
+      if (Math.hypot(playerPos.x - g.mesh.position.x, playerPos.z - g.mesh.position.z) < 2.45) {
+        parkPlayer(Math.max(1, g.mesh.position.x - 3.3), playerPos.z);
       }
-    });
+      g.mesh.position.x += g.dir * 5;
+      if (onLifeLost) onLifeLost(lives);
+      if (lives <= 0) {
+        frozen = true;
+        if (document.pointerLockElement) document.exitPointerLock();
+        setTimeout(() => { destroyAdventure3D(); if (onGameOver) onGameOver(); }, 1000);
+      }
+      break;
+    }
   }
 
   function checkGoal() {
@@ -875,6 +925,7 @@
     window.removeEventListener('keydown', onKey);
     window.removeEventListener('keyup', onKeyUp);
     document.removeEventListener('mousemove', onMouse);
+    document.removeEventListener('pointerlockchange', onPointerLock);
     window.removeEventListener('resize', onResize);
     if (document.pointerLockElement) document.exitPointerLock();
     if (renderer) {
@@ -886,6 +937,8 @@
     scene = null; camera = null; playerMesh = null; npcs = [];
     carryState = null; carryLabel = null; carryHintEl = null; carryBtn = null;
     grabQueued = false;
+    playerFill = null;
+    catchCooldown = 0;
     const ui = document.getElementById('adv3d-ui');
     if (ui) ui.remove();
     if (window.PaulMobile) window.PaulMobile.remove();
