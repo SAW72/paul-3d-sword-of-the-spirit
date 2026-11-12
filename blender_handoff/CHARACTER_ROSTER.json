@@ -1,0 +1,108 @@
+{
+  "project": "PAUL-3D-SWORD-2026",
+  "repo": "SAW72/paul-3d-sword-of-the-spirit",
+  "source_portraits": "assets/characters/",
+  "runtime_mesh": "js/character-mesh.js",
+  "characters": [
+    {
+      "id": "young_disciple",
+      "display_name": "Young Disciple",
+      "role_key": "disciple",
+      "priority": 1,
+      "playable": true,
+      "levels": [1],
+      "reference": "references/young_disciple.jpg",
+      "brief": "briefs/01_young_disciple.md",
+      "export_name": "young_disciple.glb",
+      "height_m": 1.65,
+      "notes": "Primary player avatar; highest priority"
+    },
+    {
+      "id": "ananias",
+      "display_name": "Ananias of Damascus",
+      "role_key": "ananias",
+      "priority": 2,
+      "playable": true,
+      "levels": [2],
+      "reference": "references/ananias.jpg",
+      "brief": "briefs/02_ananias.md",
+      "export_name": "ananias.glb",
+      "height_m": 1.72
+    },
+    {
+      "id": "paul_mature",
+      "display_name": "Paul the Apostle (mature)",
+      "role_key": "paul",
+      "priority": 3,
+      "playable": true,
+      "levels": [3, 4, 5, 6, 7],
+      "reference": "references/paul_mature.jpg",
+      "brief": "briefs/04_paul_mature.md",
+      "export_name": "paul_mature.glb",
+      "height_m": 1.70
+    },
+    {
+      "id": "paul_final",
+      "display_name": "Paul Final (crowned)",
+      "role_key": "paul_final",
+      "priority": 4,
+      "playable": true,
+      "levels": [8],
+      "reference": "references/paul_final.jpg",
+      "brief": "briefs/05_paul_final.md",
+      "export_name": "paul_final.glb",
+      "height_m": 1.70,
+      "notes": "Silver hair + radiant golden crown prop (optional separate object)"
+    },
+    {
+      "id": "young_saul",
+      "display_name": "Young Saul of Tarsus",
+      "role_key": "young_saul",
+      "priority": 5,
+      "playable": false,
+      "levels": ["cutscene", "gallery"],
+      "reference": "references/young_saul.jpg",
+      "brief": "briefs/03_young_saul.md",
+      "export_name": "young_saul.glb",
+      "height_m": 1.74
+    },
+    {
+      "id": "peter",
+      "display_name": "Simon Peter",
+      "role_key": "peter",
+      "priority": 6,
+      "playable": false,
+      "levels": [5],
+      "reference": "references/peter.jpg",
+      "brief": "briefs/06_peter.md",
+      "export_name": "peter.glb",
+      "height_m": 1.73
+    },
+    {
+      "id": "guard",
+      "display_name": "Saul's Guard / Temple Soldier",
+      "role_key": "guard",
+      "priority": 7,
+      "playable": false,
+      "levels": [1],
+      "reference": "references/guard.jpg",
+      "brief": "briefs/07_guard.md",
+      "export_name": "guard.glb",
+      "height_m": 1.78,
+      "notes": "Needs spear prop; multiple instances in Level 1"
+    },
+    {
+      "id": "lame_man",
+      "display_name": "Lame Man of Lystra",
+      "role_key": "lame",
+      "priority": 8,
+      "playable": false,
+      "levels": [3],
+      "reference": null,
+      "brief": "briefs/08_lame_man.md",
+      "export_name": "lame_man.glb",
+      "height_m": 1.55,
+      "notes": "No portrait file; seated/crippled pose variants recommended"
+    }
+  ]
+}
